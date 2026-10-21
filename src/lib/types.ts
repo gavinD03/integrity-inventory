@@ -16,6 +16,7 @@ export interface Profile {
   full_name: string | null;
   role: Role;
   truck_id: string | null;
+  active: boolean;
 }
 
 export interface Settings {

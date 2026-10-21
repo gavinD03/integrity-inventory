@@ -22,14 +22,10 @@ Warehouse and truck inventory for Integrity Water Treatment: tech truck view, st
 ## First-time setup
 
 1. **Deploy on Vercel:** vercel.com → Add New → Project → import `gavinD03/integrity-inventory` → Deploy. No settings or env vars needed (Vite is auto-detected; the Supabase URL and publishable key have defaults in `src/lib/supabase.ts`, and can be overridden with the variables in `.env.example`).
-2. **Point Supabase auth at your Vercel URL:** Supabase dashboard → project `iwt-inventory` → Authentication → URL Configuration → set **Site URL** to your Vercel URL (for example `https://integrity-inventory.vercel.app`) and add it under Redirect URLs. Otherwise confirmation emails link to localhost.
-3. **Create your account first.** The first person to sign up becomes the **owner**; everyone after that starts as a tech.
-4. Have your dad sign up, then in **Settings** set him to Owner (or yourself to Inventory manager), assign each tech a truck, and rename or add trucks.
-5. **Add items:** one at a time, or **Import CSV** on the Inventory page. Columns (header row required, any order): `name, sku, category, mode (each/box), tier, unit_cost, units_per_box, monthly_usage, usage_sd, lead_days, truck_par, critical, serial_tracked, strategy (stock/job), supplier, backup_price`.
-6. **Run the first audit as your baseline:** count everything in the warehouse and on every truck. Completing it posts the opening quantities as overage adjustments.
-7. Create **job kits** (for example "Softener install") in Settings so techs get a pre-filled parts list.
-
-Supabase's built-in email sender is rate-limited (a few emails per hour). If several techs sign up at once, either stagger them or add an SMTP provider in Supabase → Authentication → SMTP.
+2. **Accounts:** there is no public sign-up and no email verification. The inventory manager adds each person in **Settings** with a name, email, temporary password, role, and truck, then hands them the password. People can change their password after signing in; the manager can reset it or disable sign-in at any time. (If no owner exists yet, the sign-in page offers a one-time "Set up the owner account" form.) Accounts are created by the `admin-users` edge function in `supabase/functions/`; the database rejects any account not created through it.
+3. **Add items:** one at a time, or **Import CSV** on the Inventory page. Columns (header row required, any order): `name, sku, category, mode (each/box), tier, unit_cost, units_per_box, monthly_usage, usage_sd, lead_days, truck_par, critical, serial_tracked, strategy (stock/job), supplier, backup_price`.
+4. **Run the first audit as your baseline:** count everything in the warehouse and on every truck. Completing it posts the opening quantities as overage adjustments.
+5. Create **job kits** (for example "Softener install") in Settings so techs get a pre-filled parts list.
 
 ## Develop
 

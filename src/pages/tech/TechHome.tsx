@@ -5,6 +5,7 @@ import { must, supabase } from '../../lib/supabase';
 import { ticketCode, when, TYPE_LABEL } from '../../lib/format';
 import type { Audit, Item, Ticket } from '../../lib/types';
 import { ErrorMsg, Sheet, Stepper } from '../../components/ui';
+import ChangePassword from '../../components/ChangePassword';
 
 type SheetKind = null | 'load' | 'transfer' | 'count' | 'done';
 
@@ -25,6 +26,7 @@ export default function TechHome() {
   const [recent, setRecent] = useState<Ticket[]>([]);
   const [audit, setAudit] = useState<Audit | null>(null);
   const [counts, setCounts] = useState<Record<string, number | null>>({});
+  const [pwOpen, setPwOpen] = useState(false);
 
   const tracked = useMemo(() => items.filter((i) => i.mode === 'each'), [items]);
   const onTruck = useMemo(
@@ -128,7 +130,12 @@ export default function TechHome() {
           <div className="sub">Hi, {me.full_name}</div>
           {isManager
             ? <Link to="/" style={{ color: 'var(--on-dark-2)', fontSize: 14 }}>← Office</Link>
-            : <button className="linkbtn" style={{ fontSize: 13 }} onClick={() => supabase.auth.signOut()}>Sign out</button>}
+            : (
+              <span className="row" style={{ gap: 14 }}>
+                <button className="linkbtn" style={{ fontSize: 13 }} onClick={() => setPwOpen(true)}>Change password</button>
+                <button className="linkbtn" style={{ fontSize: 13 }} onClick={() => supabase.auth.signOut()}>Sign out</button>
+              </span>
+            )}
         </div>
         <div style={{ fontSize: 26, fontWeight: 700 }}>{truck.name}</div>
         {isManager && (
@@ -274,6 +281,8 @@ export default function TechHome() {
           ))}
         </Sheet>
       )}
+
+      {pwOpen && <ChangePassword onClose={() => setPwOpen(false)} />}
 
       {sheet === 'done' && done && (
         <Sheet title="Submitted" onClose={close} foot={<button className="btn dark block" onClick={close}>Done</button>}>

@@ -3,6 +3,7 @@ import { useData } from '../../lib/data';
 import { must, supabase } from '../../lib/supabase';
 import type { Profile, Role, Settings as S } from '../../lib/types';
 import { ErrorMsg, Field, NumInput } from '../../components/ui';
+import { adminUsers } from '../../lib/admin';
 
 export default function Settings() {
   const { me, settings, trucks, kits, items, itemById, refresh } = useData();
@@ -37,6 +38,18 @@ export default function Settings() {
 
   const num = (k: keyof S) => (v: number | null) => setS({ ...s, [k]: v ?? 0 });
   const roleOptions: Role[] = me.role === 'owner' ? ['tech', 'manager', 'owner'] : ['tech', 'manager'];
+  const [np, setNp] = useState({ full_name: '', email: '', password: '', role: 'tech' as Role, truck_id: '' });
+  const [adding, setAdding] = useState(false);
+
+  async function addPerson() {
+    setAdding(true);
+    await run(async () => {
+      await adminUsers({ action: 'create', ...np, truck_id: np.truck_id || null });
+      await loadPeople();
+      setNp({ full_name: '', email: '', password: '', role: 'tech', truck_id: '' });
+    }, `Added ${np.full_name}. Give them their email and temporary password.`);
+    setAdding(false);
+  }
 
   return (
     <main className="page">
@@ -45,18 +58,37 @@ export default function Settings() {
       {msg && <div className="ok-msg">{msg}</div>}
 
       <section className="card flush">
-        <div style={{ padding: '14px 16px' }}>
-          <h2>People + trucks</h2>
-          <p className="small muted" style={{ margin: '4px 0 0' }}>New people create an account from the sign-in page, then appear here as techs. Assign each tech a truck.</p>
+        <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div>
+            <h2>People + trucks</h2>
+            <p className="small muted" style={{ margin: '4px 0 0' }}>Add each person with a temporary password and give it to them. No email verification. They can change it after signing in.</p>
+          </div>
+          <div className="grid2" style={{ alignItems: 'end' }}>
+            <Field label="Name" id="np-name"><input id="np-name" value={np.full_name} onChange={(e) => setNp({ ...np, full_name: e.target.value })} /></Field>
+            <Field label="Email" id="np-email"><input id="np-email" type="email" autoComplete="off" value={np.email} onChange={(e) => setNp({ ...np, email: e.target.value })} /></Field>
+            <Field label="Temporary password" id="np-pw" hint="At least 8 characters"><input id="np-pw" type="text" autoComplete="off" value={np.password} onChange={(e) => setNp({ ...np, password: e.target.value })} /></Field>
+            <Field label="Role" id="np-role">
+              <select id="np-role" value={np.role} onChange={(e) => setNp({ ...np, role: e.target.value as Role })}>
+                {roleOptions.map((r) => <option key={r} value={r}>{r === 'manager' ? 'Inventory manager' : r === 'owner' ? 'Owner' : 'Tech'}</option>)}
+              </select>
+            </Field>
+            <Field label="Truck" id="np-truck">
+              <select id="np-truck" value={np.truck_id} onChange={(e) => setNp({ ...np, truck_id: e.target.value })}>
+                <option value="">No truck</option>
+                {trucks.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            </Field>
+            <button className="btn primary" disabled={adding || !np.full_name.trim() || !np.email.trim() || np.password.length < 8} onClick={addPerson}>{adding ? 'Adding…' : 'Add person'}</button>
+          </div>
         </div>
         <div className="tbl">
           <table>
-            <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Truck</th></tr></thead>
+            <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Truck</th><th>Access</th></tr></thead>
             <tbody>
               {people.map((p) => {
                 const locked = p.role === 'owner' && me.role !== 'owner';
                 return (
-                  <tr key={p.id}>
+                  <tr key={p.id} style={p.active === false ? { opacity: 0.6 } : undefined}>
                     <td>
                       <input className="inp" aria-label={`Name for ${p.email}`} defaultValue={p.full_name ?? ''} disabled={locked}
                         onBlur={(e) => e.target.value !== (p.full_name ?? '') && updatePerson(p, { full_name: e.target.value })} />
@@ -72,6 +104,23 @@ export default function Settings() {
                         <option value="">No truck</option>
                         {trucks.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                       </select>
+                    </td>
+                    <td>
+                      <div className="row" style={{ gap: 6, flexWrap: 'nowrap' }}>
+                        {p.active === false && <span className="pill grey">Disabled</span>}
+                        <button className="btn sm" disabled={locked} onClick={() => {
+                          const pw = prompt(`New temporary password for ${p.full_name} (at least 8 characters):`);
+                          if (pw) run(() => adminUsers({ action: 'set_password', user_id: p.id, password: pw }), `Password reset for ${p.full_name}.`);
+                        }}>Reset password</button>
+                        {p.id !== me.id && (
+                          <button className="btn sm" disabled={locked} onClick={() => {
+                            const next = p.active === false;
+                            if (next || confirm(`Disable sign-in for ${p.full_name}? Their ticket history stays.`)) {
+                              run(async () => { await adminUsers({ action: 'set_active', user_id: p.id, active: next }); await loadPeople(); }, next ? `${p.full_name} can sign in again.` : `${p.full_name} can no longer sign in.`);
+                            }
+                          }}>{p.active === false ? 'Enable' : 'Disable'}</button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );

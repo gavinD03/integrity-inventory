@@ -1,9 +1,12 @@
+import { useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useData } from '../lib/data';
+import ChangePassword from './ChangePassword';
 
 export default function OfficeLayout() {
   const { me } = useData();
+  const [pw, setPw] = useState(false);
   const links = [
     { to: '/', label: 'Inventory', end: true },
     { to: '/tickets', label: 'Tickets' },
@@ -23,10 +26,12 @@ export default function OfficeLayout() {
         </nav>
         <div className="who">
           <span>{me.full_name} · {me.role === 'owner' ? 'Owner' : 'Inventory manager'}</span>
+          <button className="linkbtn" onClick={() => setPw(true)}>Change password</button>
           <button className="linkbtn" onClick={() => supabase.auth.signOut()}>Sign out</button>
         </div>
       </header>
       <Outlet />
+      {pw && <ChangePassword onClose={() => setPw(false)} />}
     </>
   );
 }
