@@ -92,7 +92,7 @@ export default function AuditList() {
             <div>1. Techs submit their truck counts from the app (or count trucks before dispatch).</div>
             <div>2. Count the warehouse: Tier 3–4 and critical items every week; Tier 1–2 rotate every 3 weeks.</div>
             <div>3. Review differences and add reasons, then complete the audit. Adjustments post automatically.</div>
-            <div>4. Place the order from the reorder list. Log deliveries with Receive delivery when they arrive.</div>
+            <div>4. Place the order from Inventory → Reorder. Log deliveries in Inventory → Receive when they arrive.</div>
             <div><b>Exit rule:</b> 4 straight weeks under 5% variance → move to every other week.</div>
           </section>
         </aside>

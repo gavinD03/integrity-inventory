@@ -21,6 +21,13 @@ Warehouse and truck inventory for Integrity Water Treatment: tech truck view, st
 - **Holding rate** = capital rate + shrink (+ Tier 4 obsolescence add-on). Utilities and insurance are excluded as fixed costs. Set these in **Settings**.
 - **Audits:** start the weekly audit, count each location blind (expected quantities are hidden until saved), review differences with reasons, then complete. Differences post as adjustment tickets automatically. The audit history shows variance % and shrink $ week over week.
 
+## Inventory page
+
+- **Inventory:** actual stock per item (warehouse, trucks, min/max, status), with label printing.
+- **Reorder:** only items whose warehouse stock is at or below min, grouped by supplier with order qty and estimated cost. Items with no usage entered are never flagged (the app can't tell if they're low); they're counted and sent to Item setup.
+- **Receive:** reorder-list items are shown first; search or scan to add anything else. Enter what actually arrived, then receive into the warehouse.
+- **Item setup:** completion % per SKU and what's missing. Required: usage (or a manual min), price, supplier, box qty for box items, and no open "to confirm" note.
+
 ## SKUs, labels and scanning
 
 - **SKU format** `CATEGORY-MATERIAL-ITEM-SIZE` (e.g. `FIT-PVC-E90-100`); segments that don't apply are dropped, reducers combine sizes (`125100`). The item screen builds the SKU from four dropdowns (plus an optional second size) fed by **Settings → SKU codes**; managers can add codes inline. SKUs are uppercase letters, digits and dashes, unique (a collision offers `-2`, `-3`…).

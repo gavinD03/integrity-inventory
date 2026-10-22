@@ -160,3 +160,10 @@ h2 { font-size: 17px; }
 .login .field > label { color: #dde1dc; }
 .login input { background: var(--dark-2) !important; border-color: var(--muted) !important; color: var(--on-dark); }
 .login .btn.primary { background: #9fd4cf; border-color: #9fd4cf; color: #0a2e2e; }
+
+/* Progress bar + tab counts (Inventory) */
+.bar { flex: 1; min-width: 60px; height: 8px; border-radius: 999px; background: var(--line-2); overflow: hidden; }
+.bar > div { height: 100%; border-radius: 999px; }
+.stat .bar { margin-top: 8px; }
+.tab-count { display: inline-block; margin-left: 6px; min-width: 20px; padding: 0 6px; border-radius: 999px; background: var(--warn-soft); color: var(--warn); font-size: 12px; font-weight: 700; line-height: 20px; text-align: center; }
+.chip[aria-pressed='true'] .tab-count { background: #fff; }
