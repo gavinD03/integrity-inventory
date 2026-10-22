@@ -23,10 +23,16 @@ Warehouse and truck inventory for Integrity Water Treatment: tech truck view, st
 
 ## Inventory page
 
-- **Inventory:** actual stock per item (warehouse, trucks, min/max, status), with label printing.
-- **Reorder:** only items whose warehouse stock is at or below min, grouped by supplier with order qty and estimated cost. Items with no usage entered are never flagged (the app can't tell if they're low); they're counted and sent to Item setup.
-- **Receive:** reorder-list items are shown first; search or scan to add anything else. Enter what actually arrived, then receive into the warehouse.
+- **Inventory:** every item, complete or not: warehouse, trucks, on order, min/max, status (OK / Reorder / On order / No usage yet). Label printing.
+- **Reorder:** opens with only the items whose warehouse stock + stock on order is at or below min, with a suggested qty back to max (whole boxes). Search or scan to add anything else (e.g. a bulk carbon buy). **Place order** saves one purchase order per supplier (`PO-0001`). Open orders are listed with Receive / Close / Cancel.
+- **Receive:** opens with what's outstanding on open orders; "Everything arrived" fills a whole order. Search or scan to add anything not on an order. Short deliveries stay open until the rest arrives or the order is closed. Quantities apply to the oldest open order first.
+- Items with no usage (and no manual min) are never flagged as low.
+
+## Inventory settings
+
 - **Item setup:** completion % per SKU and what's missing. Required: usage (or a manual min), price, supplier, box qty for box items, and no open "to confirm" note.
+- **SKU codes**, **Suppliers** (contact + quote email), **Min/max + holding** rules.
+- People, trucks and job kits are under **Company settings**.
 
 ## SKUs, labels and scanning
 

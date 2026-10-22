@@ -3,47 +3,66 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useData } from '../../lib/data';
 import { minMax, orderQty, piecesLabel } from '../../lib/calc';
 import { readiness } from '../../lib/readiness';
+import { poCode, useOrders, type PurchaseOrder } from '../../lib/orders';
 import { must, supabase } from '../../lib/supabase';
-import { money, parseCsvLine } from '../../lib/format';
+import { money, parseCsvLine, when } from '../../lib/format';
 import type { Item } from '../../lib/types';
 import { ErrorMsg, Stepper } from '../../components/ui';
 import ItemImport from '../../components/ItemImport';
 import LabelPrint from '../../components/LabelPrint';
 import Scanner from '../../components/Scanner';
 
-type Tab = 'stock' | 'reorder' | 'receive' | 'setup';
+type Tab = 'stock' | 'reorder' | 'receive';
 
-interface StockRow {
-  item: Item; mm: ReturnType<typeof minMax>; rd: ReturnType<typeof readiness>; wh: number; onTrucks: number;
-  reorder: boolean; order: { pieces: number; boxes: number | null }; hasBreak: boolean;
+interface Row {
+  item: Item;
+  mm: ReturnType<typeof minMax>;
+  rd: ReturnType<typeof readiness>;
+  wh: number;
+  onTrucks: number;
+  onOrder: number;
+  /** Warehouse + on order is at or below min. Needs usage (or a manual min) to be judged at all. */
+  reorder: boolean;
+  /** Suggested order to get warehouse + on order back to max, in whole boxes for box items. */
+  order: { pieces: number; boxes: number | null };
+  hasBreak: boolean;
 }
 
+const boxStep = (i: Item) => (i.mode === 'box' ? Math.max(1, Number(i.units_per_box) || 1) : 1);
+
 export default function Dashboard() {
-  const { items, settings, qty, warehouse, trucks, breaks, refresh, supplierName } = useData();
+  const { items, settings, qty, warehouse, trucks, breaks, refresh } = useData();
+  const orders = useOrders();
   const [params, setParams] = useSearchParams();
   const tab = (params.get('tab') as Tab) || 'stock';
-  const setTab = (t: Tab) => { const n = new URLSearchParams(params); if (t === 'stock') n.delete('tab'); else n.set('tab', t); setParams(n); };
+  const go = (t: Tab, extra: Record<string, string> = {}) => {
+    const n = new URLSearchParams();
+    if (t !== 'stock') n.set('tab', t);
+    for (const [k, v] of Object.entries(extra)) n.set(k, v);
+    setParams(n);
+  };
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [xlsxFile, setXlsxFile] = useState<File | null>(null);
 
-  const rows = useMemo(() => items.map((i) => {
+  const rows: Row[] = useMemo(() => items.map((i) => {
     const mm = minMax(i, settings);
     const rd = readiness(i);
     const wh = qty(i.id, warehouse?.id);
     const onTrucks = trucks.reduce((t, tr) => t + qty(i.id, tr.id), 0);
-    // Only items with real usage (or a manual min) can be "low". No data ≠ needs ordering.
-    const reorder = rd.canCalc && wh <= mm.min;
-    const hasBreak = breaks.some((b) => b.item_id === i.id && b.min_qty > 1);
-    const order = orderQty(i, wh, mm.max);
-    return { item: i, mm, rd, wh, onTrucks, reorder, order, hasBreak };
-  }), [items, settings, qty, warehouse, trucks, breaks]);
+    const onOrder = orders.onOrder.get(i.id) ?? 0;
+    const position = wh + onOrder;
+    return {
+      item: i, mm, rd, wh, onTrucks, onOrder,
+      reorder: rd.canCalc && position <= mm.min,
+      order: orderQty(i, position, mm.max),
+      hasBreak: breaks.some((b) => b.item_id === i.id && b.min_qty > 1),
+    };
+  }), [items, settings, qty, warehouse, trucks, breaks, orders.onOrder]);
 
   const reorders = rows.filter((r) => r.reorder);
-  const noData = rows.filter((r) => r.item.strategy !== 'job' && !r.rd.canCalc);
-  const incomplete = rows.filter((r) => r.rd.missing.length > 0);
-  const overallPct = rows.length ? Math.round(rows.reduce((t, r) => t + r.rd.done, 0) / rows.reduce((t, r) => t + r.rd.total, 0) * 100) : 0;
+  const refreshAll = async () => { await Promise.all([refresh(), orders.reload()]); };
 
   async function importCsv(file: File) {
     setError(null); setMsg(null);
@@ -80,19 +99,16 @@ export default function Dashboard() {
     }
   }
 
-  const tabs: [Tab, string, number | null][] = [
-    ['stock', 'Inventory', null],
+  const tabs: [Tab, string, number][] = [
+    ['stock', 'Inventory', 0],
     ['reorder', 'Reorder', reorders.length],
-    ['receive', 'Receive', null],
-    ['setup', 'Item setup', incomplete.length],
+    ['receive', 'Receive', orders.openOrders.length],
   ];
 
   return (
     <main className="page">
       <div className="page-head">
-        <div>
-          <h1>Inventory</h1>
-        </div>
+        <h1>Inventory</h1>
         <div className="row">
           <input ref={fileRef} type="file" accept=".csv,text/csv,.xlsx" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) { if (/\.xlsx$/i.test(f.name)) setXlsxFile(f); else importCsv(f); } e.target.value = ''; }} />
           <button className="btn" onClick={() => fileRef.current?.click()}>Import items</button>
@@ -102,27 +118,40 @@ export default function Dashboard() {
 
       <div className="chips" role="tablist" aria-label="Inventory view">
         {tabs.map(([k, l, n]) => (
-          <button key={k} role="tab" className="chip" aria-selected={tab === k} aria-pressed={tab === k} onClick={() => { setMsg(null); setError(null); setTab(k); }}>
+          <button key={k} role="tab" className="chip" aria-selected={tab === k} aria-pressed={tab === k} onClick={() => { setMsg(null); setError(null); go(k); }}>
             {l}{n ? <span className="tab-count">{n}</span> : null}
           </button>
         ))}
       </div>
 
-      <ErrorMsg error={error} />
+      <ErrorMsg error={error ?? orders.error} />
       {msg && <div className="ok-msg">{msg}</div>}
 
-      {tab === 'stock' && <StockTab rows={rows} items={items} />}
-      {tab === 'reorder' && <ReorderTab reorders={reorders} noData={noData.length} supplierName={supplierName} goSetup={() => setTab('setup')} goReceive={() => setTab('receive')} />}
-      {tab === 'receive' && <ReceiveTab rows={rows} onDone={(m) => { setMsg(m); setTab('stock'); }} />}
-      {tab === 'setup' && <SetupTab rows={rows} overallPct={overallPct} supplierName={supplierName} />}
+      {tab === 'stock' && <StockTab rows={rows} />}
+      {tab === 'reorder' && (
+        <ReorderTab
+          key={orders.openOrders.map((o) => o.id).join()}
+          rows={rows} openOrders={orders.openOrders}
+          onPlaced={async (m) => { await orders.reload(); setMsg(m); }}
+          onChanged={refreshAll}
+          receive={(po) => go('receive', po ? { po } : {})}
+        />
+      )}
+      {tab === 'receive' && (
+        <ReceiveTab
+          rows={rows} openOrders={orders.openOrders} focusPo={params.get('po')}
+          onDone={async (m) => { await refreshAll(); setMsg(m); go('stock'); }}
+        />
+      )}
 
       {xlsxFile && <ItemImport file={xlsxFile} onClose={() => setXlsxFile(null)} />}
     </main>
   );
 }
 
-// ---------- Inventory (actual stock) ----------
-function StockTab({ rows, items }: { rows: StockRow[]; items: Item[] }) {
+// ---------------- Inventory: every item, complete or not ----------------
+function StockTab({ rows }: { rows: Row[] }) {
+  const { items } = useData();
   const nav = useNavigate();
   const [search, setSearch] = useState('');
   const [where, setWhere] = useState<'all' | 'instock' | 'out'>('all');
@@ -135,13 +164,15 @@ function StockTab({ rows, items }: { rows: StockRow[]; items: Item[] }) {
     return true;
   });
   const value = rows.reduce((t, r) => t + (r.wh + r.onTrucks) * (Number(r.item.unit_cost) || 0), 0);
+  const incomplete = rows.filter((r) => r.rd.missing.length).length;
   return (
     <>
       <div className="stats">
         <div className="stat"><div className="label">Items</div><div className="value">{rows.length}</div><div className="small muted">{rows.filter((r) => r.wh + r.onTrucks > 0).length} with stock on hand</div></div>
-        <div className="stat"><div className="label">Pieces on hand</div><div className="value">{rows.reduce((t, r) => t + r.wh, 0)}</div><div className="small muted">Warehouse · {rows.reduce((t, r) => t + r.onTrucks, 0)} more on trucks</div></div>
-        <div className="stat"><div className="label">Stock value</div><div className="value">{money(value)}</div><div className="small muted">Only items with a price</div></div>
+        <div className="stat"><div className="label">Pieces in warehouse</div><div className="value">{rows.reduce((t, r) => t + r.wh, 0)}</div><div className="small muted">{rows.reduce((t, r) => t + r.onTrucks, 0)} more on trucks</div></div>
+        <div className="stat"><div className="label">Stock value</div><div className="value">{money(value)}</div><div className="small muted">Items with a price only</div></div>
       </div>
+      {incomplete > 0 && <div className="note small" style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}><span>{incomplete} items are missing setup info (usage, price, supplier or box qty). They’re listed here anyway.</span><Link className="btn sm" to="/inventory-settings">Finish setup</Link></div>}
       <div className="card flush">
         <div className="row" style={{ padding: '14px 16px', borderBottom: '1px solid var(--line)' }}>
           <div className="chips">
@@ -155,24 +186,26 @@ function StockTab({ rows, items }: { rows: StockRow[]; items: Item[] }) {
         <div className="tbl">
           <table>
             <thead>
-              <tr><th style={{ width: 36 }}><input type="checkbox" aria-label="Select all shown" checked={visible.length > 0 && visible.every((r) => picked.has(r.item.id))} onChange={(e) => setPicked(e.target.checked ? new Set([...picked, ...visible.map((r) => r.item.id)]) : new Set([...picked].filter((id) => !visible.some((r) => r.item.id === id))))} style={{ width: 18, height: 18 }} /></th><th>Item</th><th className="num">Warehouse</th><th className="num">Trucks</th><th className="num">Min / Max</th><th>Status</th></tr>
+              <tr><th style={{ width: 36 }}><input type="checkbox" aria-label="Select all shown" checked={visible.length > 0 && visible.every((r) => picked.has(r.item.id))} onChange={(e) => setPicked(e.target.checked ? new Set([...picked, ...visible.map((r) => r.item.id)]) : new Set([...picked].filter((id) => !visible.some((r) => r.item.id === id))))} style={{ width: 18, height: 18 }} /></th><th>Item</th><th className="num">Warehouse</th><th className="num">Trucks</th><th className="num">On order</th><th className="num">Min / Max</th><th>Status</th></tr>
             </thead>
             <tbody>
-              {visible.length === 0 && <tr><td colSpan={6} className="muted" style={{ padding: 20 }}>{rows.length ? 'No items match.' : 'No items yet.'}</td></tr>}
-              {visible.map(({ item: i, mm, rd, wh, onTrucks, reorder, order }) => (
+              {visible.length === 0 && <tr><td colSpan={7} className="muted" style={{ padding: 20 }}>{rows.length ? 'No items match.' : 'No items yet.'}</td></tr>}
+              {visible.map(({ item: i, mm, rd, wh, onTrucks, onOrder, reorder, order }) => (
                 <tr key={i.id} className="click" onClick={() => nav(`/items/${i.id}`)}>
                   <td onClick={(e) => e.stopPropagation()}><input type="checkbox" aria-label={`Select ${i.name}`} checked={picked.has(i.id)} onChange={(e) => { const n = new Set(picked); if (e.target.checked) n.add(i.id); else n.delete(i.id); setPicked(n); }} style={{ width: 18, height: 18 }} /></td>
                   <td>
                     <div style={{ fontWeight: 600 }}>{i.name}</div>
                     <div className="small muted mono">{i.sku}{i.mode === 'box' ? ` · box of ${i.units_per_box ?? '?'}` : ''}</div>
                   </td>
-                  <td className="num">{i.strategy === 'job' ? '—' : piecesLabel(i, wh)}</td>
-                  <td className="num">{i.strategy === 'job' ? '—' : onTrucks || '—'}</td>
+                  <td className="num">{piecesLabel(i, wh)}</td>
+                  <td className="num">{onTrucks || '—'}</td>
+                  <td className="num">{onOrder || '—'}</td>
                   <td className="num">{rd.canCalc ? `${mm.min} / ${mm.max}` : '—'}</td>
                   <td>
                     {mm.perJob ? <span className="pill grey">Buy per job</span>
-                      : !rd.canCalc ? <span className="pill grey">No usage yet</span>
                       : reorder ? <span className="pill warn">Reorder {order.boxes != null ? `${order.boxes} bx` : order.pieces}</span>
+                      : onOrder > 0 ? <span className="pill amber">On order</span>
+                      : !rd.canCalc ? <span className="pill grey">No usage yet</span>
                       : <span className="pill ok">OK</span>}
                   </td>
                 </tr>
@@ -186,99 +219,76 @@ function StockTab({ rows, items }: { rows: StockRow[]; items: Item[] }) {
   );
 }
 
-// ---------- Reorder (only what's actually low) ----------
-function ReorderTab({ reorders, noData, supplierName, goSetup, goReceive }: {
-  reorders: { item: Item; wh: number; mm: { min: number; max: number }; order: { pieces: number; boxes: number | null }; hasBreak: boolean; rd: { missing: { label: string }[] } }[];
-  noData: number; supplierName: (id: string | null) => string; goSetup: () => void; goReceive: () => void;
-}) {
-  const nav = useNavigate();
-  const groups = new Map<string, typeof reorders>();
-  for (const r of reorders) {
-    const k = r.item.supplier_id ?? '';
-    groups.set(k, [...(groups.get(k) ?? []), r]);
-  }
-  const total = reorders.reduce((t, r) => t + r.order.pieces * (Number(r.item.unit_cost) || 0), 0);
-  const unpriced = reorders.filter((r) => !(Number(r.item.unit_cost) > 0)).length;
+// ---------------- Search + scan box shared by Reorder and Receive ----------------
+function AddItem({ rows, onAdd, scanTitle, placeholder }: { rows: Row[]; onAdd: (r: Row, pieces: number) => string; scanTitle: string; placeholder: string }) {
+  const [search, setSearch] = useState('');
+  const [scan, setScan] = useState(false);
+  const [last, setLast] = useState<string | null>(null);
+  const q = search.trim().toLowerCase();
+  const matches = q ? rows.filter((r) => r.item.strategy !== 'job' && `${r.item.sku ?? ''} ${r.item.name}`.toLowerCase().includes(q)).slice(0, 10) : [];
   return (
-    <>
-      <div className="stats">
-        <div className="stat"><div className="label">Items to order</div><div className={`value ${reorders.length ? 'warn' : ''}`}>{reorders.length}</div><div className="small muted">Warehouse at or below min</div></div>
-        <div className="stat"><div className="label">Estimated cost</div><div className="value">{money(total)}</div><div className="small muted">{unpriced ? `${unpriced} item${unpriced === 1 ? '' : 's'} without a price not included` : 'Orders bring each item back to max'}</div></div>
+    <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div className="row" style={{ flexWrap: 'nowrap' }}>
+        <input className="inp" type="search" placeholder={placeholder} aria-label="Search items" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <button type="button" className="btn primary" onClick={() => setScan(true)}>Scan</button>
       </div>
-      {noData > 0 && (
-        <div className="note row" style={{ justifyContent: 'space-between' }}>
-          <span><b>{noData} items aren’t checked</b> because they have no usage entered, so the app can’t tell if they’re low.</span>
-          <button className="btn sm" onClick={goSetup}>Finish item setup</button>
+      {last && <div className="small ok-msg">{last}</div>}
+      {matches.map((r) => (
+        <div key={r.item.id} className="pick-row">
+          <div className="grow"><div style={{ fontWeight: 600 }}>{r.item.name}</div><div className="small muted"><span className="mono">{r.item.sku}</span> · have {r.wh}{r.onOrder ? ` · ${r.onOrder} on order` : ''}</div></div>
+          <button className="btn sm" onClick={() => { setLast(onAdd(r, boxStep(r.item))); setSearch(''); }}>+ Add</button>
         </div>
-      )}
-      {reorders.length === 0 ? (
-        <div className="card muted">Nothing needs ordering right now.</div>
-      ) : (
-        [...groups.entries()].map(([sid, list]) => (
-          <div key={sid} className="card flush">
-            <div className="row" style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)', justifyContent: 'space-between' }}>
-              <h2>{sid ? supplierName(sid) : 'No supplier set'}</h2>
-              <span className="small muted">{list.length} item{list.length === 1 ? '' : 's'} · {money(list.reduce((t, r) => t + r.order.pieces * (Number(r.item.unit_cost) || 0), 0))}</span>
-            </div>
-            <div className="tbl">
-              <table>
-                <thead><tr><th>Item</th><th className="num">Have</th><th className="num">Min</th><th className="num">Order</th><th className="num">Est. cost</th></tr></thead>
-                <tbody>
-                  {list.map((r) => (
-                    <tr key={r.item.id} className="click" onClick={() => nav(`/items/${r.item.id}`)}>
-                      <td>
-                        <div style={{ fontWeight: 600 }}>{r.item.name}</div>
-                        <div className="small muted mono">{r.item.sku}</div>
-                        {r.hasBreak && <Link className="small" style={{ fontWeight: 600 }} onClick={(e) => e.stopPropagation()} to={`/bulk?item=${r.item.id}`}>Price break available · check bulk buy</Link>}
-                      </td>
-                      <td className="num">{r.wh}</td>
-                      <td className="num">{r.mm.min}</td>
-                      <td className="num" style={{ fontWeight: 600 }}>{r.order.boxes != null ? `${r.order.boxes} bx (${r.order.pieces})` : r.order.pieces}</td>
-                      <td className="num">{Number(r.item.unit_cost) > 0 ? money(r.order.pieces * Number(r.item.unit_cost)) : <span className="pill amber">No price</span>}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        ))
-      )}
-      {reorders.length > 0 && <div><button className="btn" onClick={goReceive}>Delivery arrived? Receive it</button></div>}
-    </>
+      ))}
+      {q && matches.length === 0 && <div className="small muted">No items match “{search}”.</div>}
+      {scan && <Scanner title={scanTitle} onItem={(s) => {
+        const r = rows.find((x) => x.item.id === s.item.id);
+        if (!r || r.item.strategy === 'job') return `${s.item.name} is buy-per-job (not stocked)`;
+        const m = onAdd(r, s.pieces);
+        setLast(m);
+        return m;
+      }} onClose={() => setScan(false)} />}
+    </div>
   );
 }
 
-// ---------- Receive (reorder items first; search or scan anything else) ----------
-function ReceiveTab({ rows, onDone }: { rows: { item: Item; wh: number; reorder: boolean; order: { pieces: number; boxes: number | null } }[]; onDone: (msg: string) => void }) {
-  const { warehouse, refresh } = useData();
-  const [recv, setRecv] = useState<Record<string, number>>({});
-  const [added, setAdded] = useState<string[]>([]);
-  const [search, setSearch] = useState('');
-  const [scan, setScan] = useState(false);
+// ---------------- Reorder: build and place orders ----------------
+interface Draft { qty: number; include: boolean; manual: boolean }
+
+function ReorderTab({ rows, openOrders, onPlaced, onChanged, receive }: {
+  rows: Row[]; openOrders: PurchaseOrder[];
+  onPlaced: (msg: string) => void; onChanged: () => Promise<void>; receive: (po?: string) => void;
+}) {
+  const { supplierName, itemById } = useData();
+  const [draft, setDraft] = useState<Record<string, Draft>>(() =>
+    Object.fromEntries(rows.filter((r) => r.reorder).map((r) => [r.item.id, { qty: r.order.pieces, include: true, manual: false }])));
+  const [notes, setNotes] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [lastScan, setLastScan] = useState<string | null>(null);
 
-  const stockable = rows.filter((r) => r.item.strategy !== 'job');
-  const expected = stockable.filter((r) => r.reorder);
-  const extra = added.map((id) => stockable.find((r) => r.item.id === id)).filter((r): r is typeof stockable[number] => !!r && !r.reorder);
-  const q = search.trim().toLowerCase();
-  const matches = q ? stockable.filter((r) => `${r.item.sku ?? ''} ${r.item.name}`.toLowerCase().includes(q)).slice(0, 12) : [];
-  const lines = Object.entries(recv).filter(([, n]) => n > 0);
-  const totalPcs = lines.reduce((t, [, n]) => t + n, 0);
-
-  const add = (id: string, pcs: number) => {
-    setRecv((p) => ({ ...p, [id]: (p[id] ?? 0) + pcs }));
-    setAdded((a) => (a.includes(id) ? a : [...a, id]));
+  const add = (r: Row, pieces: number) => {
+    const cur = draft[r.item.id];
+    const qty = (cur?.include ? cur.qty : 0) + pieces;
+    setDraft((d) => ({ ...d, [r.item.id]: { qty, include: true, manual: cur ? cur.manual : true } }));
+    return `${r.item.sku ?? r.item.name}: ordering ${qty}`;
   };
 
-  async function submit() {
-    if (!warehouse) return;
+  const lines = Object.entries(draft).map(([id, d]) => ({ row: rows.find((r) => r.item.id === id), ...d })).filter((l): l is { row: Row } & Draft => !!l.row);
+  const groups = new Map<string, typeof lines>();
+  for (const l of lines) { const k = l.row.item.supplier_id ?? ''; groups.set(k, [...(groups.get(k) ?? []), l]); }
+  const chosen = lines.filter((l) => l.include && l.qty > 0);
+  const chosenGroups = new Set(chosen.map((l) => l.row.item.supplier_id ?? ''));
+  const total = chosen.reduce((t, l) => t + l.qty * (Number(l.row.item.unit_cost) || 0), 0);
+  const noData = rows.filter((r) => r.item.strategy !== 'job' && !r.rd.canCalc).length;
+
+  async function place() {
     setBusy(true); setError(null);
     try {
-      must(await supabase.rpc('submit_ticket', { p_type: 'receive', p_from: null, p_to: warehouse.id, p_lines: lines.map(([item_id, q]) => ({ item_id, qty: q })), p_note: 'Supplier delivery' }));
-      await refresh();
-      onDone(`Received ${totalPcs} pieces across ${lines.length} item${lines.length === 1 ? '' : 's'} into the warehouse.`);
+      const payload = [...chosenGroups].map((sid) => ({
+        supplier_id: sid || null, note: notes.trim() || null,
+        lines: chosen.filter((l) => (l.row.item.supplier_id ?? '') === sid).map((l) => ({ item_id: l.row.item.id, qty: l.qty, manual: l.manual })),
+      }));
+      const res = must(await supabase.rpc('place_orders', { p_orders: payload })) as { number: number }[];
+      onPlaced(`Placed ${res.map((r, idx) => `${poCode(r.number)} (${payload[idx].supplier_id ? supplierName(payload[idx].supplier_id) : 'no supplier'})`).join(', ')}. They’re now on the Receive tab.`);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -286,135 +296,176 @@ function ReceiveTab({ rows, onDone }: { rows: { item: Item; wh: number; reorder:
     }
   }
 
-  const line = (r: typeof stockable[number], hint?: string) => (
-    <div key={r.item.id} className="pick-row">
-      <div className="grow">
-        <div style={{ fontWeight: 600 }}>{r.item.name}</div>
-        <div className="small muted"><span className="mono">{r.item.sku}</span> · have {piecesLabel(r.item, r.wh)}{hint ? ` · ${hint}` : ''}</div>
-      </div>
-      <Stepper value={recv[r.item.id] ?? 0} step={r.item.mode === 'box' ? r.item.units_per_box || 1 : 1} suffix=" pcs" onChange={(v) => { setRecv({ ...recv, [r.item.id]: v }); if (!added.includes(r.item.id)) setAdded([...added, r.item.id]); }} />
-    </div>
-  );
+  async function setStatus(po: PurchaseOrder, status: 'closed' | 'cancelled') {
+    const verb = status === 'cancelled' ? 'Cancel' : 'Close';
+    if (!confirm(`${verb} ${poCode(po.number)}? ${status === 'closed' ? 'Anything not yet received is treated as not coming.' : 'Nothing was received on it.'}`)) return;
+    setError(null);
+    try { must(await supabase.rpc('set_order_status', { p_po: po.id, p_status: status })); await onChanged(); } catch (e) { setError((e as Error).message); }
+  }
 
   return (
     <div className="split">
       <section className="main" style={{ gap: 16 }}>
-        <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <div className="row" style={{ flexWrap: 'nowrap' }}>
-            <input className="inp" type="search" placeholder="Search SKU or name to add an item" aria-label="Search items" value={search} onChange={(e) => setSearch(e.target.value)} autoFocus />
-            <button type="button" className="btn primary" onClick={() => setScan(true)}>Scan</button>
-          </div>
-          {lastScan && <div className="small ok-msg">{lastScan}</div>}
-          {matches.length > 0 && (
-            <div>
-              {matches.map((r) => (
-                <div key={r.item.id} className="pick-row">
-                  <div className="grow"><div style={{ fontWeight: 600 }}>{r.item.name}</div><div className="small muted mono">{r.item.sku}</div></div>
-                  <button className="btn sm" onClick={() => { add(r.item.id, r.item.mode === 'box' ? r.item.units_per_box || 1 : 1); setSearch(''); }}>
-                    + {r.item.mode === 'box' ? `1 box (${r.item.units_per_box || 1})` : '1'}
-                  </button>
-                </div>
-              ))}
+        <AddItem rows={rows} onAdd={add} scanTitle="Scan to add to the order" placeholder="Search or scan to order something that isn’t low (e.g. a bulk buy)" />
+        {noData > 0 && <div className="note small"><div>{noData} items have no usage yet, so they can’t be flagged as low. Add them above if you need them, or <Link to="/inventory-settings">finish their setup</Link>.</div></div>}
+
+        {lines.length === 0 && <div className="card muted">Nothing is low right now{openOrders.length ? ' (items already on order are counted)' : ''}. Search or scan above to order something anyway.</div>}
+        {[...groups.entries()].map(([sid, list]) => (
+          <div key={sid} className="card flush">
+            <div className="row" style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)', justifyContent: 'space-between' }}>
+              <h2>{sid ? supplierName(sid) : 'No supplier set'}</h2>
+              <span className="small muted">{money(list.filter((l) => l.include).reduce((t, l) => t + l.qty * (Number(l.row.item.unit_cost) || 0), 0))}</span>
             </div>
-          )}
-          {q && matches.length === 0 && <div className="small muted">No items match “{search}”.</div>}
-        </div>
+            {list.map(({ row: r, qty, include, manual }) => (
+              <div key={r.item.id} className="pick-row" style={{ padding: '10px 16px', opacity: include ? 1 : 0.5 }}>
+                <input type="checkbox" aria-label={`Order ${r.item.name}`} checked={include} onChange={(e) => setDraft({ ...draft, [r.item.id]: { qty, manual, include: e.target.checked } })} style={{ width: 18, height: 18 }} />
+                <div className="grow">
+                  <div style={{ fontWeight: 600 }}>{r.item.name} {manual && <span className="pill grey">Added</span>}</div>
+                  <div className="small muted">
+                    <span className="mono">{r.item.sku}</span> · have {r.wh}{r.onOrder ? ` + ${r.onOrder} on order` : ''}{r.rd.canCalc ? ` · min ${r.mm.min} / max ${r.mm.max}` : ''}
+                    {Number(r.item.unit_cost) > 0 ? ` · ${money(qty * Number(r.item.unit_cost))}` : ' · no price'}
+                    {r.item.mode === 'box' && r.item.units_per_box ? ` · ${Math.round((qty / r.item.units_per_box) * 10) / 10} bx` : ''}
+                  </div>
+                  {r.hasBreak && <Link className="small" style={{ fontWeight: 600 }} to={`/bulk?item=${r.item.id}`}>Price break available · check bulk buy</Link>}
+                </div>
+                <Stepper value={qty} step={boxStep(r.item)} suffix=" pcs" onChange={(v) => setDraft({ ...draft, [r.item.id]: { qty: v, manual, include: include || v > 0 } })} />
+              </div>
+            ))}
+          </div>
+        ))}
 
-        <div className="card">
-          <h2>On the reorder list ({expected.length})</h2>
-          <p className="small muted" style={{ margin: '4px 0 8px' }}>What you’d expect in a delivery. Enter what actually arrived.</p>
-          {expected.length === 0 ? <div className="small muted">Nothing is on the reorder list. Search or scan to receive items.</div>
-            : expected.map((r) => line(r, `ordered ~${r.order.boxes != null ? `${r.order.boxes} bx` : r.order.pieces}`))}
-        </div>
-
-        {extra.length > 0 && (
-          <div className="card">
-            <h2>Also received</h2>
-            {extra.map((r) => line(r))}
+        {openOrders.length > 0 && (
+          <div className="card flush">
+            <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)' }}><h2>Open orders</h2></div>
+            {openOrders.map((o) => {
+              const done = o.lines.filter((l) => l.qty_received >= l.qty_ordered).length;
+              const anyRecv = o.lines.some((l) => l.qty_received > 0);
+              return (
+                <details key={o.id} style={{ padding: '10px 16px', borderBottom: '1px solid var(--line-2)' }}>
+                  <summary className="row" style={{ justifyContent: 'space-between', cursor: 'pointer' }}>
+                    <span><b className="mono">{poCode(o.number)}</b> · {o.supplier_id ? supplierName(o.supplier_id) : 'No supplier'} · {when(o.created_at)} · {done}/{o.lines.length} lines received</span>
+                    <span className="row" style={{ gap: 6 }}>
+                      <button className="btn sm primary" onClick={(e) => { e.preventDefault(); receive(o.id); }}>Receive</button>
+                      {anyRecv
+                        ? <button className="btn sm" onClick={(e) => { e.preventDefault(); setStatus(o, 'closed'); }}>Close</button>
+                        : <button className="btn sm" onClick={(e) => { e.preventDefault(); setStatus(o, 'cancelled'); }}>Cancel</button>}
+                    </span>
+                  </summary>
+                  <div style={{ paddingTop: 8 }}>
+                    {o.lines.map((l) => (
+                      <div key={l.id} className="small row" style={{ justifyContent: 'space-between' }}>
+                        <span>{itemById(l.item_id)?.name ?? 'Archived item'}{l.added_by_hand ? ' (added)' : ''}</span>
+                        <span className="mono">{l.qty_received} / {l.qty_ordered}</span>
+                      </div>
+                    ))}
+                    {o.note && <div className="small muted" style={{ marginTop: 6 }}>{o.note}</div>}
+                  </div>
+                </details>
+              );
+            })}
           </div>
         )}
       </section>
 
       <aside className="side">
         <section className="card" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <h2>Delivery</h2>
-          <div className="small muted">Supplier → warehouse</div>
-          <div style={{ fontFamily: 'var(--mono)', fontSize: 22 }}>{totalPcs} pcs · {lines.length} item{lines.length === 1 ? '' : 's'}</div>
+          <h2>Place order</h2>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 22 }}>{chosen.length} item{chosen.length === 1 ? '' : 's'} · {money(total)}</div>
+          <div className="small muted">{chosenGroups.size > 1 ? `Creates ${chosenGroups.size} orders, one per supplier.` : 'Creates one order.'} Prices without a cost aren’t in the total.</div>
+          <div className="field"><label htmlFor="po-note">Note</label><input id="po-note" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional, e.g. called Hughes, pallet pricing" /></div>
           <ErrorMsg error={error} />
-          <button className="btn primary block" disabled={busy || lines.length === 0} onClick={submit}>{busy ? 'Saving…' : 'Receive into warehouse'}</button>
-          {lines.length > 0 && <button className="btn block" onClick={() => { setRecv({}); setAdded([]); setLastScan(null); }}>Clear</button>}
+          <button className="btn primary block" disabled={busy || chosen.length === 0} onClick={place}>{busy ? 'Placing…' : chosenGroups.size > 1 ? `Place ${chosenGroups.size} orders` : 'Place order'}</button>
+          <div className="small muted">Placing records what you ordered. Send it to the supplier however you normally do.</div>
         </section>
       </aside>
-
-      {scan && <Scanner title="Scan the delivery" onItem={(r) => {
-        if (r.item.strategy === 'job') return `${r.item.name} is buy-per-job (not stocked)`;
-        const next = (recv[r.item.id] ?? 0) + r.pieces;
-        add(r.item.id, r.pieces);
-        const m = `+${r.pieces} ${r.item.sku ?? r.item.name} → ${next}${r.label ? ` (${r.label})` : ''}`;
-        setLastScan(m);
-        return m;
-      }} onClose={() => setScan(false)} />}
     </div>
   );
 }
 
-// ---------- Item setup (completion per SKU) ----------
-function SetupTab({ rows, overallPct, supplierName }: { rows: { item: Item; rd: ReturnType<typeof readiness> }[]; overallPct: number; supplierName: (id: string | null) => string }) {
-  const nav = useNavigate();
-  const [show, setShow] = useState<'todo' | 'all' | string>('todo');
-  const [search, setSearch] = useState('');
-  const keys = ['usage', 'price', 'supplier', 'box', 'confirm'] as const;
-  const labels: Record<string, string> = { usage: 'Usage', price: 'Price', supplier: 'Supplier', box: 'Box qty', confirm: 'To confirm' };
-  const missingCount = (k: string) => rows.filter((r) => r.rd.missing.some((m) => m.key === k)).length;
-  const complete = rows.filter((r) => r.rd.missing.length === 0).length;
-  const visible = rows
-    .filter((r) => show === 'all' ? true : show === 'todo' ? r.rd.missing.length > 0 : r.rd.missing.some((m) => m.key === show))
-    .filter((r) => !search || `${r.item.sku ?? ''} ${r.item.name}`.toLowerCase().includes(search.toLowerCase()))
-    .sort((a, b) => a.rd.pct - b.rd.pct || (a.item.sku ?? '').localeCompare(b.item.sku ?? ''));
-  return (
-    <>
-      <div className="stats">
-        <div className="stat"><div className="label">Setup complete</div><div className="value">{overallPct}%</div><Bar pct={overallPct} /></div>
-        <div className="stat"><div className="label">Ready to order</div><div className="value">{complete} / {rows.length}</div><div className="small muted">Every required field filled</div></div>
-      </div>
-      <div className="note small">Required to order and keep in stock: <b>usage</b> (drives min/max), <b>price</b>, <b>supplier</b>, <b>box qty</b> for items bought by the box, and clearing any <b>“to confirm”</b> note. Everything else is optional.</div>
-      <div className="card flush">
-        <div className="row" style={{ padding: '14px 16px', borderBottom: '1px solid var(--line)' }}>
-          <div className="chips">
-            <button className="chip" aria-pressed={show === 'todo'} onClick={() => setShow('todo')}>Incomplete · {rows.length - complete}</button>
-            {keys.map((k) => { const n = missingCount(k); return n ? <button key={k} className="chip" aria-pressed={show === k} onClick={() => setShow(k)}>No {labels[k].toLowerCase()} · {n}</button> : null; })}
-            <button className="chip" aria-pressed={show === 'all'} onClick={() => setShow('all')}>All · {rows.length}</button>
-          </div>
-          <input className="inp" type="search" placeholder="Search SKU or name" aria-label="Search items" value={search} onChange={(e) => setSearch(e.target.value)} style={{ maxWidth: 220, marginLeft: 'auto' }} />
-        </div>
-        <div className="tbl">
-          <table>
-            <thead><tr><th>SKU</th><th>Item</th><th style={{ width: 140 }}>Complete</th><th>Missing</th></tr></thead>
-            <tbody>
-              {visible.length === 0 && <tr><td colSpan={4} className="muted" style={{ padding: 20 }}>{show === 'todo' ? 'Every item is set up.' : 'No items match.'}</td></tr>}
-              {visible.map(({ item: i, rd }) => (
-                <tr key={i.id} className="click" onClick={() => nav(`/items/${i.id}`)}>
-                  <td className="mono">{i.sku ?? '—'}</td>
-                  <td>
-                    <div style={{ fontWeight: 600 }}>{i.name}</div>
-                    <div className="small muted">{[i.supplier_id ? supplierName(i.supplier_id) : null, i.needs_confirm ? `To confirm: ${i.needs_confirm}` : null].filter(Boolean).join(' · ')}</div>
-                  </td>
-                  <td><div className="row" style={{ gap: 8, flexWrap: 'nowrap' }}><Bar pct={rd.pct} /><span className="mono small">{rd.pct}%</span></div></td>
-                  <td>{rd.missing.length ? <span className="row" style={{ gap: 4 }}>{rd.missing.map((m) => <span key={m.key} className="pill amber">{m.label === 'Confirmed' ? 'To confirm' : m.label}</span>)}</span> : <span className="pill ok">Ready</span>}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </>
-  );
-}
+// ---------------- Receive: what's on open orders, plus anything scanned ----------------
+function ReceiveTab({ rows, openOrders, focusPo, onDone }: { rows: Row[]; openOrders: PurchaseOrder[]; focusPo: string | null; onDone: (msg: string) => void }) {
+  const { supplierName } = useData();
+  const [recv, setRecv] = useState<Record<string, number>>({});
+  const [extra, setExtra] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const rowById = new Map(rows.map((r) => [r.item.id, r]));
 
-function Bar({ pct }: { pct: number }) {
+  // Each item appears once, under the oldest open order it's still outstanding on.
+  const sorted = [...openOrders].sort((a, b) => (a.id === focusPo ? -1 : b.id === focusPo ? 1 : a.created_at.localeCompare(b.created_at)));
+  const seen = new Set<string>();
+  const sections = sorted.map((o) => ({
+    order: o,
+    lines: o.lines.filter((l) => l.qty_received < l.qty_ordered && !seen.has(l.item_id) && (seen.add(l.item_id), true))
+      .map((l) => ({ row: rowById.get(l.item_id), outstanding: rows.length ? (rowById.get(l.item_id)?.onOrder ?? 0) : 0, line: l }))
+      .filter((x): x is { row: Row; outstanding: number; line: typeof x.line } => !!x.row),
+  })).filter((s) => s.lines.length);
+  const extraRows = extra.filter((id) => !seen.has(id)).map((id) => rowById.get(id)).filter((r): r is Row => !!r);
+
+  const add = (r: Row, pieces: number) => {
+    const next = (recv[r.item.id] ?? 0) + pieces;
+    setRecv((p) => ({ ...p, [r.item.id]: (p[r.item.id] ?? 0) + pieces }));
+    if (!seen.has(r.item.id)) setExtra((x) => (x.includes(r.item.id) ? x : [...x, r.item.id]));
+    return `+${pieces} ${r.item.sku ?? r.item.name} → ${next}${seen.has(r.item.id) ? '' : ' (not on an order)'}`;
+  };
+  const lines = Object.entries(recv).filter(([, n]) => n > 0);
+  const totalPcs = lines.reduce((t, [, n]) => t + n, 0);
+
+  async function submit() {
+    setBusy(true); setError(null);
+    try {
+      const res = must(await supabase.rpc('receive_delivery', { p_lines: lines.map(([item_id, q]) => ({ item_id, qty: q })), p_po: focusPo, p_note: null })) as { not_on_order: number };
+      onDone(`Received ${totalPcs} pieces across ${lines.length} item${lines.length === 1 ? '' : 's'}.${res.not_on_order ? ` ${res.not_on_order} item${res.not_on_order === 1 ? ' was' : 's were'} more than was on order.` : ''}`);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const lineRow = (r: Row, outstanding?: number) => (
+    <div key={r.item.id} className="pick-row" style={{ padding: '10px 16px' }}>
+      <div className="grow">
+        <div style={{ fontWeight: 600 }}>{r.item.name}</div>
+        <div className="small muted"><span className="mono">{r.item.sku}</span> · have {piecesLabel(r.item, r.wh)}{outstanding != null ? ` · expecting ${outstanding}` : ''}</div>
+      </div>
+      {outstanding != null && <button className="btn sm" onClick={() => setRecv({ ...recv, [r.item.id]: outstanding })}>All {outstanding}</button>}
+      <Stepper value={recv[r.item.id] ?? 0} step={boxStep(r.item)} suffix=" pcs" onChange={(v) => setRecv({ ...recv, [r.item.id]: v })} />
+    </div>
+  );
+
   return (
-    <div className="bar" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
-      <div style={{ width: `${pct}%`, background: pct === 100 ? 'var(--accent)' : pct >= 60 ? 'var(--amber)' : 'var(--warn)' }} />
+    <div className="split">
+      <section className="main" style={{ gap: 16 }}>
+        <AddItem rows={rows} onAdd={add} scanTitle="Scan the delivery" placeholder="Search or scan anything that arrived" />
+        {sections.length === 0 && <div className="card muted">No open orders. Search or scan what arrived to receive it.</div>}
+        {sections.map(({ order: o, lines: ls }) => (
+          <div key={o.id} className="card flush" style={o.id === focusPo ? { borderColor: 'var(--accent)' } : undefined}>
+            <div className="row" style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)', justifyContent: 'space-between' }}>
+              <h2><span className="mono">{poCode(o.number)}</span> · {o.supplier_id ? supplierName(o.supplier_id) : 'No supplier'}</h2>
+              <button className="btn sm" onClick={() => setRecv({ ...recv, ...Object.fromEntries(ls.map((x) => [x.row.item.id, x.outstanding])) })}>Everything arrived</button>
+            </div>
+            {ls.map((x) => lineRow(x.row, x.outstanding))}
+          </div>
+        ))}
+        {extraRows.length > 0 && (
+          <div className="card flush">
+            <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)' }}><h2>Not on an order</h2></div>
+            {extraRows.map((r) => lineRow(r))}
+          </div>
+        )}
+      </section>
+      <aside className="side">
+        <section className="card" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <h2>Delivery</h2>
+          <div className="small muted">Supplier → warehouse</div>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 22 }}>{totalPcs} pcs · {lines.length} item{lines.length === 1 ? '' : 's'}</div>
+          <div className="small muted">Short? Enter only what came. The rest stays on the order until it arrives or you close the order.</div>
+          <ErrorMsg error={error} />
+          <button className="btn primary block" disabled={busy || lines.length === 0} onClick={submit}>{busy ? 'Saving…' : 'Receive into warehouse'}</button>
+          {lines.length > 0 && <button className="btn block" onClick={() => { setRecv({}); setExtra([]); }}>Clear</button>}
+        </section>
+      </aside>
     </div>
   );
 }

@@ -13,7 +13,8 @@ export default function OfficeLayout() {
     { to: '/audits', label: 'Audits' },
     { to: '/quotes', label: 'Quotes' },
     { to: '/bulk', label: 'Bulk buy' },
-    { to: '/settings', label: 'Settings' },
+    { to: '/inventory-settings', label: 'Inventory settings' },
+    { to: '/settings', label: 'Company settings' },
     { to: '/truck', label: 'Tech view' },
   ];
   return (

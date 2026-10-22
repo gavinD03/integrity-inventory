@@ -15,6 +15,7 @@ import Tickets from './pages/office/Tickets';
 import AuditList from './pages/office/AuditList';
 import AuditRun from './pages/office/AuditRun';
 import Settings from './pages/office/Settings';
+import InventorySettings from './pages/office/InventorySettings';
 import QuotesPage from './pages/office/quotes/QuotesPage';
 
 export default function App() {
@@ -65,6 +66,7 @@ export default function App() {
           <Route path="/audits" element={<AuditList />} />
           <Route path="/audits/:id" element={<AuditRun />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/inventory-settings" element={<InventorySettings />} />
           <Route path="/quotes" element={<QuotesPage />} />
         </Route>
         <Route path="/truck" element={<TechHome />} />
