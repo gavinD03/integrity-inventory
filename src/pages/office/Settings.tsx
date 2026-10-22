@@ -167,9 +167,13 @@ export default function Settings() {
           <section className="card" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <h2>Suppliers</h2>
             {suppliers.map((x) => (
-              <div key={x.id} className="row" style={{ flexWrap: 'nowrap', opacity: x.active ? 1 : 0.6 }}>
-                <input className="inp" aria-label="Supplier name" defaultValue={x.name} onBlur={(e) => e.target.value.trim() && e.target.value.trim() !== x.name && run(async () => { must(await supabase.from('suppliers').update({ name: e.target.value.trim() }).eq('id', x.id).select('id')); }, 'Supplier renamed.')} />
-                <button className="btn sm" onClick={() => run(async () => { must(await supabase.from('suppliers').update({ active: !x.active }).eq('id', x.id).select('id')); }, x.active ? `${x.name} deactivated.` : `${x.name} reactivated.`)}>{x.active ? 'Deactivate' : 'Reactivate'}</button>
+              <div key={x.id} style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingBottom: 10, borderBottom: '1px solid var(--line)', opacity: x.active ? 1 : 0.6 }}>
+                <div className="row" style={{ flexWrap: 'nowrap' }}>
+                  <input className="inp" aria-label="Supplier name" defaultValue={x.name} onBlur={(e) => e.target.value.trim() && e.target.value.trim() !== x.name && run(async () => { must(await supabase.from('suppliers').update({ name: e.target.value.trim() }).eq('id', x.id).select('id')); }, 'Supplier renamed.')} />
+                  <button className="btn sm" onClick={() => run(async () => { must(await supabase.from('suppliers').update({ active: !x.active }).eq('id', x.id).select('id')); }, x.active ? `${x.name} deactivated.` : `${x.name} reactivated.`)}>{x.active ? 'Deactivate' : 'Reactivate'}</button>
+                </div>
+                <input className="inp" aria-label={`${x.name} contact name`} placeholder="Contact name" defaultValue={x.contact_name ?? ''} onBlur={(e) => e.target.value.trim() !== (x.contact_name ?? '') && run(async () => { must(await supabase.from('suppliers').update({ contact_name: e.target.value.trim() || null }).eq('id', x.id).select('id')); }, 'Contact saved.')} />
+                <input className="inp" type="email" aria-label={`${x.name} quote email`} placeholder="Quote email (comma-separate several)" defaultValue={x.email ?? ''} onBlur={(e) => e.target.value.trim() !== (x.email ?? '') && run(async () => { must(await supabase.from('suppliers').update({ email: e.target.value.trim() || null }).eq('id', x.id).select('id')); }, 'Email saved.')} />
               </div>
             ))}
             <div className="row" style={{ flexWrap: 'nowrap' }}>

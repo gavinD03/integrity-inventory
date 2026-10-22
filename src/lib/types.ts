@@ -144,6 +144,8 @@ export interface Supplier {
   name: string;
   active: boolean;
   notes: string | null;
+  email: string | null;
+  contact_name: string | null;
 }
 
 export interface QuoteRound {
@@ -163,6 +165,8 @@ export interface SupplierQuote {
   uploaded_at: string;
   requested_at: string | null;
   status: 'requested' | 'draft' | 'saved';
+  emailed_at: string | null;
+  emailed_to: string | null;
 }
 
 export interface QuoteLine {

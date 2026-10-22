@@ -5,12 +5,13 @@ import { annualUse, topBySpend } from '../../../lib/quoteCompare';
 import { buildQuotePdf, buildQuoteWorkbook, download, safeName, type RequestItem } from '../../../lib/sheets';
 import type { QuoteRound, SupplierQuote } from '../../../lib/types';
 import { ErrorMsg } from '../../../components/ui';
+import { blobToBase64, callFunction } from '../../../lib/admin';
 import { previousRequests } from './useQuotes';
 
 type Prev = Awaited<ReturnType<typeof previousRequests>>[number];
 
 export default function RequestView({ round, quotes, reload }: { round: QuoteRound; quotes: SupplierQuote[]; reload: () => Promise<void> }) {
-  const { items, suppliers, supplierName } = useData();
+  const { items, suppliers, supplierName, refresh } = useData();
   const active = suppliers.filter((s) => s.active);
   const [supplierId, setSupplierId] = useState<string>('');
   // Every item is listed by default; deselect what this supplier doesn't carry.
@@ -25,7 +26,18 @@ export default function RequestView({ round, quotes, reload }: { round: QuoteRou
   const [includeAnnual, setIncludeAnnual] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [generated, setGenerated] = useState<{ xlsx: Blob; pdf: Blob; base: string; count: number } | null>(null);
+  const [generated, setGenerated] = useState<{ xlsx: Blob; pdf: Blob; base: string; count: number; quoteId: string } | null>(null);
+  const [mail, setMail] = useState({ to: '', cc: '', subject: '', message: '', save: true });
+  const [mailStatus, setMailStatus] = useState<{ configured: boolean; from: string | null } | null>(null);
+  const [sending, setSending] = useState(false);
+  const [sentMsg, setSentMsg] = useState<string | null>(null);
+  const [mailError, setMailError] = useState<string | null>(null);
+
+  useEffect(() => {
+    callFunction('send-quote-email', { action: 'status' })
+      .then((r) => setMailStatus({ configured: !!r.configured, from: (r.from as string) ?? null }))
+      .catch(() => setMailStatus({ configured: false, from: null }));
+  }, []);
 
   useEffect(() => { previousRequests().then(setPrev); }, [quotes]);
 
@@ -49,18 +61,49 @@ export default function RequestView({ round, quotes, reload }: { round: QuoteRou
     setBusy(true); setError(null); setGenerated(null);
     try {
       const chosen = items.filter((i) => selected.has(i.id)).sort((a, b) => (a.category ?? '').localeCompare(b.category ?? '') || (a.sku ?? '').localeCompare(b.sku ?? ''));
-      const res = must(await supabase.rpc('create_quote_request', { p_round: round.id, p_supplier: supplierId, p_items: chosen.map((i) => i.id) })) as { lines: number };
+      const res = must(await supabase.rpc('create_quote_request', { p_round: round.id, p_supplier: supplierId, p_items: chosen.map((i) => i.id) })) as { lines: number; quote_id: string };
       const meta = { supplier: supplierName(supplierId), round: round.label, date: new Date().toLocaleDateString() };
       const rows: RequestItem[] = chosen.map((i) => ({ sku: i.sku ?? '', name: i.name, annual: includeAnnual ? Math.round(annualUse(i)) || null : null }));
       const [xlsx, pdf] = await Promise.all([buildQuoteWorkbook(meta, rows), buildQuotePdf(meta, rows)]);
       const base = `IWT_Quote_${safeName(round.label)}_${safeName(meta.supplier)}`;
       // Browsers block a second automatic download, so each file gets its own button below.
-      setGenerated({ xlsx, pdf, base, count: res.lines });
+      setGenerated({ xlsx, pdf, base, count: res.lines, quoteId: res.quote_id });
+      const sup = suppliers.find((x) => x.id === supplierId);
+      const hello = sup?.contact_name ? `Hi ${sup.contact_name.split(' ')[0]},` : 'Hi,';
+      setMail({
+        to: sup?.email ?? '', cc: '', save: true,
+        subject: `Quote request: ${round.label} (Integrity Water Treatment)`,
+        message: `${hello}\n\nAttached is a quote request for ${res.lines} items. Please fill in the shaded columns in the Excel file (box qty, retail price for one piece, and bulk price and bulk qty if you offer them) and reply with the file attached. Leave a row blank if you don't carry the item.\n\nThe PDF is the same list if that's easier to read.\n\nThanks,`,
+      });
+      setSentMsg(null); setMailError(null);
       await reload();
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function sendEmail() {
+    if (!generated) return;
+    setSending(true); setMailError(null); setSentMsg(null);
+    try {
+      const sup = suppliers.find((x) => x.id === supplierId);
+      const attachments = [
+        { filename: `${generated.base}.xlsx`, base64: await blobToBase64(generated.xlsx), type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+        { filename: `${generated.base}.pdf`, base64: await blobToBase64(generated.pdf), type: 'application/pdf' },
+      ];
+      const r = await callFunction('send-quote-email', { quote_id: generated.quoteId, to: mail.to, cc: mail.cc, subject: mail.subject, message: mail.message, attachments });
+      if (mail.save && sup && mail.to.trim() !== (sup.email ?? '')) {
+        await supabase.from('suppliers').update({ email: mail.to.trim() }).eq('id', sup.id);
+        await refresh();
+      }
+      setSentMsg(`Sent to ${(r.to as string[]).join(', ')}. A copy is in your Gmail Sent folder.`);
+      await reload();
+    } catch (e) {
+      setMailError((e as Error).message);
+    } finally {
+      setSending(false);
     }
   }
 
@@ -76,13 +119,13 @@ export default function RequestView({ round, quotes, reload }: { round: QuoteRou
               const q = quotes.find((x) => x.supplier_id === s.id);
               return (
                 <button key={s.id} className="chip" aria-pressed={supplierId === s.id} onClick={() => { setSupplierId(s.id); setGenerated(null); }}>
-                  {s.name}{q ? ` · ${q.status === 'saved' ? 'quoted' : q.status === 'requested' ? 'requested' : 'draft'}` : ''}
+                  {s.name}{q ? ` · ${q.status === 'saved' ? 'quoted' : q.emailed_at ? 'emailed' : q.status === 'requested' ? 'requested' : 'draft'}` : ''}
                 </button>
               );
             })}
           </div>
           {existing?.status === 'saved' && <div className="err">{supplierName(supplierId)} already returned a quote for {round.label}. Upload or edit their reply instead of sending a new request.</div>}
-          {existing?.status === 'requested' && <div className="small muted">A request was already generated for this supplier. Generating again replaces its item list.</div>}
+          {existing?.status === 'requested' && <div className="small muted">A request was already generated for this supplier{existing.emailed_at ? ` and emailed to ${existing.emailed_to} on ${new Date(existing.emailed_at).toLocaleDateString()}` : ''}. Generating again replaces its item list.</div>}
         </div>
 
         <div className="card flush">
@@ -165,6 +208,30 @@ export default function RequestView({ round, quotes, reload }: { round: QuoteRou
                 <button className="btn primary" onClick={() => download(generated.xlsx, `${generated.base}.xlsx`)}>Download Excel</button>
                 <button className="btn" onClick={() => download(generated.pdf, `${generated.base}.pdf`)}>Download PDF</button>
               </span>
+            </div>
+          )}
+          {generated && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, borderTop: '1px solid var(--line)', paddingTop: 12 }}>
+              <h2>4 · Email to {supplierName(supplierId)}</h2>
+              {mailStatus && !mailStatus.configured ? (
+                <div className="note" style={{ padding: 12 }}>Email isn’t connected yet. Download the files above and attach them yourself, or finish the Gmail setup.</div>
+              ) : (
+                <>
+                  <div className="field"><label htmlFor="m-to">To</label><input id="m-to" type="email" multiple value={mail.to} onChange={(e) => setMail({ ...mail, to: e.target.value })} placeholder="supplier@example.com" /></div>
+                  {mail.to.trim() !== (suppliers.find((x) => x.id === supplierId)?.email ?? '') && mail.to.trim() && (
+                    <label className="check"><input type="checkbox" checked={mail.save} onChange={(e) => setMail({ ...mail, save: e.target.checked })} /> Save as {supplierName(supplierId)}’s quote email</label>
+                  )}
+                  <div className="field"><label htmlFor="m-cc">CC</label><input id="m-cc" value={mail.cc} onChange={(e) => setMail({ ...mail, cc: e.target.value })} placeholder="Optional" /></div>
+                  <div className="field"><label htmlFor="m-subj">Subject</label><input id="m-subj" value={mail.subject} onChange={(e) => setMail({ ...mail, subject: e.target.value })} /></div>
+                  <div className="field"><label htmlFor="m-msg">Message</label><textarea id="m-msg" rows={8} value={mail.message} onChange={(e) => setMail({ ...mail, message: e.target.value })} /></div>
+                  <div className="small muted">Excel and PDF attached automatically.{mailStatus?.from ? ` Sends from ${mailStatus.from}; replies come back there.` : ''}</div>
+                  <ErrorMsg error={mailError} />
+                  {sentMsg && <div className="ok-msg">{sentMsg}</div>}
+                  <button className="btn primary block" disabled={sending || !mail.to.trim() || !mail.subject.trim() || !!sentMsg} onClick={sendEmail}>
+                    {sending ? 'Sending…' : sentMsg ? 'Sent' : `Send to ${supplierName(supplierId)}`}
+                  </button>
+                </>
+              )}
             </div>
           )}
         </section>
