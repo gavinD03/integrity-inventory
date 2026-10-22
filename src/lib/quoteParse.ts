@@ -174,6 +174,8 @@ export interface ParsedItemRow {
     max_override: number | null;
     override_note: string | null;
     truck_par: number;
+    notes: string | null;
+    needs_confirm: string | null;
   };
   issues: string[];
 }
@@ -259,6 +261,8 @@ export function parseItemRows(rows: Cell[][]): { rows: ParsedItemRow[]; error: s
         max_override: mm.max,
         override_note: mm.min != null || mm.max != null ? notes || 'Imported override' : null,
         truck_par: strategy === 'truck' ? n(get('par'), 'Truck par') ?? 0 : 0,
+        notes: notes || null,
+        needs_confirm: cols.status != null && !/^confirmed$/i.test(status) ? status || 'Confirm details' : null,
       },
       issues,
     });

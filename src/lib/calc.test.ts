@@ -13,7 +13,7 @@ const base: Item = {
   serial_tracked: false, strategy: 'truck', owner: 'manager', supplier_id: null, unit_cost: 133, units_per_box: null, monthly_usage: 10,
   usage_sd: 3, lead_days: 3, supplier: null, backup_supplier: null, backup_price: null, trip_cost: 0,
   shelf_life_months: null, storage_max: null, truck_par: 0, min_override: null, max_override: null,
-  override_note: null, usage_source: 'supplier history', active: true, sku_locked: false, label_printed_at: null,
+  override_note: null, usage_source: 'supplier history', active: true, sku_locked: false, label_printed_at: null, notes: null, needs_confirm: null,
 };
 
 describe('zFor', () => {

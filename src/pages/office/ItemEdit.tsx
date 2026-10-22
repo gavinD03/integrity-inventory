@@ -15,7 +15,7 @@ const blank: Item = {
   strategy: 'truck', owner: 'manager', supplier_id: null, unit_cost: 0, units_per_box: null, monthly_usage: 0, usage_sd: 0, lead_days: 3,
   supplier: null, backup_supplier: null, backup_price: null, trip_cost: 0, shelf_life_months: null,
   storage_max: null, truck_par: 0, min_override: null, max_override: null, override_note: null,
-  usage_source: 'supplier history', active: true, sku_locked: false, label_printed_at: null,
+  usage_source: 'supplier history', active: true, sku_locked: false, label_printed_at: null, notes: null, needs_confirm: null,
 };
 
 interface BreakRow { id?: string; min_qty: number | null; unit_price: number | null }
@@ -138,10 +138,17 @@ export default function ItemEdit() {
             <h2>Item</h2>
             {params.get('saved') && <div className="ok-msg">Saved.{f.sku ? ' You can print its label below.' : ''}</div>}
             {pendingBarcode && <div className="ok-msg">Barcode <span className="mono">{pendingBarcode}</span> will be linked to this item when you save.</div>}
+            {f.needs_confirm && (
+              <div className="row" style={{ background: 'var(--amber-soft)', color: 'var(--amber)', borderRadius: 8, padding: '10px 12px', justifyContent: 'space-between' }}>
+                <span><b>To confirm:</b> {f.needs_confirm}</span>
+                <button type="button" className="btn sm" onClick={() => set('needs_confirm', null)}>Mark confirmed</button>
+              </div>
+            )}
             <SkuBuilder sku={f.sku} locked={!!existing?.sku_locked && !!existing?.sku} onChange={(v) => set('sku', v)} />
             <div className="grid2">
               <Field label="Name" id="i-name"><input id="i-name" value={f.name} onChange={(e) => set('name', e.target.value)} /></Field>
               <Field label="Category" id="i-cat"><input id="i-cat" value={f.category ?? ''} onChange={(e) => set('category', e.target.value || null)} placeholder="Systems, Media, Fittings…" /></Field>
+              <Field label="Notes" id="i-notes"><input id="i-notes" value={f.notes ?? ''} onChange={(e) => set('notes', e.target.value || null)} placeholder="e.g. Stock 6 per size" /></Field>
             </div>
             <Seg label="How we buy it" value={f.mode} onChange={(v) => set('mode', v)} options={[
               { value: 'each', label: 'Individually', desc: 'Systems, filters, media' },

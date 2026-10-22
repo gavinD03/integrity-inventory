@@ -67,6 +67,8 @@ export interface Item {
   active: boolean;
   sku_locked: boolean;
   label_printed_at: string | null;
+  notes: string | null;
+  needs_confirm: string | null;
 }
 
 export interface PriceBreak {

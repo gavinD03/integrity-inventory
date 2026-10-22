@@ -9,7 +9,7 @@ import ItemImport from '../../components/ItemImport';
 import LabelPrint from '../../components/LabelPrint';
 import Scanner from '../../components/Scanner';
 
-type Filter = 'all' | 'reorder' | 'each' | 'box' | 'job';
+type Filter = 'all' | 'reorder' | 'confirm' | 'each' | 'box' | 'job';
 
 export default function Dashboard() {
   const { items, settings, qty, warehouse, trucks, breaks, refresh } = useData();
@@ -41,6 +41,7 @@ export default function Dashboard() {
   const visible = rows.filter((r) => {
     if (search && !`${r.item.name} ${r.item.sku ?? ''} ${r.item.category ?? ''}`.toLowerCase().includes(search.toLowerCase())) return false;
     if (filter === 'reorder') return r.reorder;
+    if (filter === 'confirm') return !!r.item.needs_confirm;
     if (filter === 'each') return r.item.mode === 'each' && r.item.strategy !== 'job';
     if (filter === 'box') return r.item.mode === 'box';
     if (filter === 'job') return r.item.strategy === 'job';
@@ -132,7 +133,7 @@ export default function Dashboard() {
           <div className="card flush">
             <div className="row" style={{ padding: '14px 16px', borderBottom: '1px solid var(--line)' }}>
               <div className="chips">
-                {([['all', 'All'], ['reorder', 'Needs reorder'], ['each', 'Systems, filters + media'], ['box', 'Bought by the box'], ['job', 'Buy per job']] as [Filter, string][]).map(([k, l]) => (
+                {([['all', 'All'], ['reorder', 'Needs reorder'], ['confirm', `To confirm · ${items.filter((i) => i.needs_confirm).length}`], ['each', 'Systems, filters + media'], ['box', 'Bought by the box'], ['job', 'Buy per job']] as [Filter, string][]).map(([k, l]) => (
                   <button key={k} className="chip" aria-pressed={filter === k} onClick={() => setFilter(k)}>{l}</button>
                 ))}
               </div>
@@ -153,7 +154,7 @@ export default function Dashboard() {
                       <td>
                         <div style={{ fontWeight: 600 }}>{i.name}</div>
                         <div className="small muted">
-                          {[i.sku, i.mode === 'box' ? `${i.units_per_box ?? '?'} per box` : null, i.critical ? 'Critical' : null, i.serial_tracked ? 'Serial tracked' : null, mm.overridden ? 'Min/max overridden' : null].filter(Boolean).join(' · ')}
+                          {[i.sku, i.needs_confirm ? `To confirm: ${i.needs_confirm}` : null, i.mode === 'box' ? `${i.units_per_box ?? '?'} per box` : null, i.critical ? 'Critical' : null, i.serial_tracked ? 'Serial tracked' : null, mm.overridden ? 'Min/max overridden' : null].filter(Boolean).join(' · ')}
                         </div>
                       </td>
                       <td className="mono">T{i.tier}</td>
