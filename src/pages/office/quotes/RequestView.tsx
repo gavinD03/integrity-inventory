@@ -13,7 +13,8 @@ export default function RequestView({ round, quotes, reload }: { round: QuoteRou
   const { items, suppliers, supplierName } = useData();
   const active = suppliers.filter((s) => s.active);
   const [supplierId, setSupplierId] = useState<string>('');
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Every item is listed by default; deselect what this supplier doesn't carry.
+  const [selected, setSelected] = useState<Set<string>>(() => new Set(items.map((i) => i.id)));
   const [search, setSearch] = useState('');
   const [cat, setCat] = useState('');
   const [strategy, setStrategy] = useState('');

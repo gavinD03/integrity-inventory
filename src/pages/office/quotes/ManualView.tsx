@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from 'react';
 import { useData } from '../../../lib/data';
 import { must, supabase } from '../../../lib/supabase';
-import { quoteWarnings, toNum } from '../../../lib/quoteParse';
+import { bulkSavingsPct, quoteWarnings, toNum } from '../../../lib/quoteParse';
 import type { QuoteLine, QuoteRound, SupplierQuote } from '../../../lib/types';
 import { ErrorMsg } from '../../../components/ui';
-import { checkContext, fmt$ } from './shared';
+import { checkContext } from './shared';
 
-type Field = 'pieces' | 'list' | 'bq' | 'bp' | 'notes';
-const LABEL: Record<Field, string> = { pieces: 'Pieces per pack', list: 'List price per pack', bq: 'Bulk qty', bp: 'Bulk price per piece', notes: 'Notes' };
+type Field = 'pieces' | 'retail' | 'bp' | 'bq' | 'notes';
+const LABEL: Record<Field, string> = { pieces: 'Box qty', retail: 'Retail price each', bp: 'Bulk price each', bq: 'Bulk qty', notes: 'Notes' };
+const NUM_FIELDS: Field[] = ['pieces', 'retail', 'bp', 'bq'];
 type Entry = Record<Field, string>;
 
 /** Hand entry for suppliers who reply on the PDF. Tab moves across, Enter moves down. */
@@ -20,7 +21,7 @@ export default function ManualView({ round, quotes, lines, reload, onSaved }: {
   const quote = quotes.find((q) => q.supplier_id === supplierId);
   const qLines = useMemo(
     () => lines
-      .filter((l) => quote && l.quote_id === quote.id && l.item_id && (l.requested || l.list_pack_price != null || l.bulk_unit_price != null))
+      .filter((l) => quote && l.quote_id === quote.id && l.item_id && (l.requested || l.list_unit_price != null || l.bulk_unit_price != null))
       .sort((a, b) => (a.sku_raw ?? '').localeCompare(b.sku_raw ?? '')),
     [lines, quote],
   );
@@ -31,15 +32,15 @@ export default function ManualView({ round, quotes, lines, reload, onSaved }: {
   useEffect(() => {
     const s = (v: number | string | null) => (v == null ? '' : String(v));
     setEntries(Object.fromEntries(qLines.map((l) => [l.item_id as string, {
-      pieces: s(l.pieces_per_pack), list: s(l.list_pack_price), bq: s(l.bulk_qty), bp: s(l.bulk_unit_price), notes: l.notes ?? '',
+      pieces: s(l.pieces_per_pack), retail: s(l.list_unit_price), bq: s(l.bulk_qty), bp: s(l.bulk_unit_price), notes: l.notes ?? '',
     }])));
   }, [qLines]);
 
   const parsed = (e: Entry | undefined) => {
     const n = (v: string | undefined) => { const x = toNum(v ?? ''); return x == null || Number.isNaN(x) || x < 0 ? null : x; };
-    const bad = e ? (['pieces', 'list', 'bq', 'bp'] as Field[]).filter((f) => e[f].trim() && (toNum(e[f]) == null || Number.isNaN(toNum(e[f]) as number))) : [];
+    const bad = e ? NUM_FIELDS.filter((f) => e[f].trim() && (toNum(e[f]) == null || Number.isNaN(toNum(e[f]) as number))) : [];
     return {
-      pieces_per_pack: n(e?.pieces) || null, list_pack_price: n(e?.list), bulk_qty: n(e?.bq) || null, bulk_unit_price: n(e?.bp), notes: e?.notes ?? '',
+      pieces_per_pack: n(e?.pieces) || null, list_unit_price: n(e?.retail), bulk_qty: n(e?.bq) || null, bulk_unit_price: n(e?.bp), notes: e?.notes ?? '',
       bad,
     };
   };
@@ -59,8 +60,8 @@ export default function ManualView({ round, quotes, lines, reload, onSaved }: {
     try {
       const payload = qLines.map((l) => {
         const p = parsed(entries[l.item_id as string]);
-        return { item_id: l.item_id, sku_raw: l.sku_raw, description_raw: l.description_raw, pieces_per_pack: p.pieces_per_pack, list_pack_price: p.list_pack_price, bulk_qty: p.bulk_qty, bulk_unit_price: p.bulk_unit_price, notes: p.notes, match_status: 'matched' };
-      }).filter((x) => x.pieces_per_pack != null || x.list_pack_price != null || x.bulk_qty != null || x.bulk_unit_price != null || x.notes);
+        return { item_id: l.item_id, sku_raw: l.sku_raw, description_raw: l.description_raw, pieces_per_pack: p.pieces_per_pack, list_unit_price: p.list_unit_price, bulk_qty: p.bulk_qty, bulk_unit_price: p.bulk_unit_price, notes: p.notes, match_status: 'matched' };
+      }).filter((x) => x.pieces_per_pack != null || x.list_unit_price != null || x.bulk_qty != null || x.bulk_unit_price != null || x.notes);
       must(await supabase.rpc('save_quote', { p_round: round.id, p_supplier: supplierId, p_file_name: 'Entered by hand', p_lines: payload, p_status: status }));
       await reload();
       if (status === 'saved') onSaved();
@@ -92,24 +93,23 @@ export default function ManualView({ round, quotes, lines, reload, onSaved }: {
         <section className="card flush">
           <div className="tbl">
             <table>
-              <thead><tr><th>SKU</th><th>Item</th><th className="num">Pcs/pack</th><th className="num">List/pack $</th><th className="num">$/pc</th><th className="num">Bulk qty</th><th className="num">Bulk $/pc</th><th>Notes</th><th>Warnings</th></tr></thead>
+              <thead><tr><th>SKU</th><th>Item</th><th className="num">Box qty</th><th className="num">Retail each</th><th className="num">Bulk each</th><th className="num">Bulk qty</th><th className="num">Savings</th><th>Notes</th><th>Warnings</th></tr></thead>
               <tbody>
                 {qLines.map((l, row) => {
                   const id = l.item_id as string;
-                  const e = entries[id] ?? { pieces: '', list: '', bq: '', bp: '', notes: '' };
+                  const e = entries[id] ?? { pieces: '', retail: '', bq: '', bp: '', notes: '' };
                   const p = parsed(e);
                   const it = itemById(id);
                   const w = [
                     ...p.bad.map((f) => `${LABEL[f]} isn't a number`),
                     ...quoteWarnings(p, checkContext(it, supplierId, quotes, lines)),
                   ];
-                  const per = p.list_pack_price != null && p.pieces_per_pack ? p.list_pack_price / p.pieces_per_pack : null;
+                  const sav = bulkSavingsPct(p.list_unit_price, p.bulk_unit_price);
                   return (
                     <tr key={id}>
                       <td className="mono small">{l.sku_raw}</td>
                       <td style={{ minWidth: 180 }}>{it?.name ?? l.description_raw}</td>
-                      {(['pieces', 'list', 'bq', 'bp'] as Field[]).map((f, col) => [
-                        col === 2 ? <td key="pp" className="num small">{fmt$(per, 4)}</td> : null,
+                      {NUM_FIELDS.map((f, col) => [
                         <td key={f} className="num">
                           <input id={`m-${row}-${col}`} className="inp mono" inputMode="decimal" aria-label={`${LABEL[f]} for ${it?.name ?? l.sku_raw}`} value={e[f]}
                             onKeyDown={(ev) => onKey(ev, row, col)}
@@ -117,6 +117,7 @@ export default function ManualView({ round, quotes, lines, reload, onSaved }: {
                             style={{ width: 90, textAlign: 'right', minHeight: 38 }} />
                         </td>,
                       ])}
+                      <td className="num small">{sav == null ? '—' : `${sav.toFixed(1)}%`}</td>
                       <td>
                         <input id={`m-${row}-4`} className="inp" aria-label={`Notes for ${it?.name ?? l.sku_raw}`} value={e.notes}
                           onKeyDown={(ev) => onKey(ev, row, 4)}

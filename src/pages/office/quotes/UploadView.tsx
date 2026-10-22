@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useData } from '../../../lib/data';
 import { must, supabase } from '../../../lib/supabase';
-import { normSku, parseQuoteRows, quoteWarnings, type ParsedQuoteRow } from '../../../lib/quoteParse';
+import { bulkSavingsPct, normSku, parseQuoteRows, quoteWarnings, type ParsedQuoteRow } from '../../../lib/quoteParse';
 import { readSheet } from '../../../lib/sheets';
 import type { QuoteLine, QuoteRound, SupplierQuote } from '../../../lib/types';
 import { ErrorMsg } from '../../../components/ui';
@@ -58,7 +58,7 @@ export default function UploadView({ round, quotes, lines, reload, onSaved }: {
       const payload = rows.map((r) => ({
         item_id: r.match === 'ignored' ? null : r.itemId,
         sku_raw: r.sku_raw, description_raw: r.description_raw,
-        pieces_per_pack: r.pieces_per_pack, list_pack_price: r.list_pack_price,
+        pieces_per_pack: r.pieces_per_pack, list_pack_price: r.list_pack_price, list_unit_price: r.list_unit_price,
         bulk_qty: r.bulk_qty, bulk_unit_price: r.bulk_unit_price, notes: r.notes,
         match_status: r.match,
       }));
@@ -143,12 +143,12 @@ export default function UploadView({ round, quotes, lines, reload, onSaved }: {
             <div style={{ padding: '14px 16px' }}><h2>Preview</h2><p className="small muted" style={{ margin: '4px 0 0' }}>Warnings don't block saving.</p></div>
             <div className="tbl">
               <table>
-                <thead><tr><th>Row</th><th>Item</th><th className="num">Pcs/pack</th><th className="num">List/pack</th><th className="num">List $/pc</th><th className="num">Bulk qty</th><th className="num">Bulk $/pc</th><th>Warnings</th><th></th></tr></thead>
+                <thead><tr><th>Row</th><th>Item</th><th className="num">Box qty</th><th className="num">Retail each</th><th className="num">Bulk each</th><th className="num">Bulk qty</th><th className="num">Bulk savings</th><th>Warnings</th><th></th></tr></thead>
                 <tbody>
                   {rows.map((r, idx) => {
                     const it = r.itemId ? itemById(r.itemId) : undefined;
                     const w = [...r.issues, ...quoteWarnings(r, checkContext(it, supplierId, quotes, lines))];
-                    const per = r.list_pack_price != null && r.pieces_per_pack ? r.list_pack_price / r.pieces_per_pack : null;
+                    const sav = bulkSavingsPct(r.list_unit_price, r.bulk_unit_price);
                     return (
                       <tr key={idx} style={r.match === 'ignored' ? { opacity: 0.5 } : undefined}>
                         <td className="mono">{r.row}</td>
@@ -157,10 +157,10 @@ export default function UploadView({ round, quotes, lines, reload, onSaved }: {
                           <div className="small muted mono">{r.sku_raw}{r.match === 'manual' ? ' · mapped by hand' : r.match === 'unmatched' ? ' · unmatched' : r.match === 'ignored' ? ' · ignored' : ''}</div>
                         </td>
                         <td className="num">{r.pieces_per_pack ?? '—'}</td>
-                        <td className="num">{fmt$(r.list_pack_price)}</td>
-                        <td className="num">{fmt$(per, 4)}</td>
-                        <td className="num">{r.bulk_qty ?? '—'}</td>
+                        <td className="num">{fmt$(r.list_unit_price, 4)}</td>
                         <td className="num">{fmt$(r.bulk_unit_price, 4)}</td>
+                        <td className="num">{r.bulk_qty ?? '—'}</td>
+                        <td className="num">{sav == null ? '—' : `${sav.toFixed(1)}%`}</td>
                         <td className="small" style={{ color: w.length ? 'var(--warn)' : undefined, maxWidth: 320 }}>{w.join(' · ') || '—'}</td>
                         <td>{r.match === 'ignored'
                           ? <button className="btn sm" onClick={() => setRow(idx, { match: r.itemId ? 'manual' : 'unmatched' })}>Undo</button>

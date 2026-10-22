@@ -6,6 +6,7 @@ import { ticketCode, when, TYPE_LABEL } from '../../lib/format';
 import type { Audit, Item, Ticket } from '../../lib/types';
 import { ErrorMsg, Sheet, Stepper } from '../../components/ui';
 import ChangePassword from '../../components/ChangePassword';
+import { piecesLabel } from '../../lib/calc';
 
 type SheetKind = null | 'load' | 'transfer' | 'count' | 'done';
 
@@ -67,7 +68,10 @@ export default function TechHome() {
         p_type: isT ? 'transfer' : 'load',
         p_from: isT ? truckId : warehouse.id,
         p_to: isT ? dest : truckId,
-        p_lines: chosen.map(([item_id, q]) => ({ item_id, qty: q })),
+        p_lines: chosen.map(([item_id, q]) => {
+          const it = itemById(item_id);
+          return { item_id, qty: !isT && it?.mode === 'box' ? q * (it.units_per_box || 1) : q };
+        }),
       })) as { number: number };
       const code = ticketCode({ type: isT ? 'transfer' : 'load', number: res.number });
       setDone({
@@ -183,7 +187,7 @@ export default function TechHome() {
             </div>
           );
         })}
-        <div className="small muted" style={{ padding: '4px 4px 0' }}>Fittings aren't counted on the truck. Fitting boxes are logged when you load them.</div>
+        <div className="small muted" style={{ padding: '4px 4px 0' }}>Fittings aren't counted on the truck. Load them by the box; the warehouse count drops by the pieces in each box.</div>
 
         {recent.length > 0 && (
           <div className="card" style={{ marginTop: 8 }}>
@@ -235,7 +239,7 @@ export default function TechHome() {
             const sub = sheet === 'transfer'
               ? `On your truck: ${qty(i.id, truckId)}`
               : i.mode === 'box'
-                ? `Boxes · warehouse has ${qty(i.id, warehouse?.id)}`
+                ? `Boxes of ${i.units_per_box ?? '?'} · warehouse has ${piecesLabel(i, qty(i.id, warehouse?.id))} pcs`
                 : `Warehouse ${qty(i.id, warehouse?.id)} · on truck ${qty(i.id, truckId)} / par ${i.truck_par}`;
             return (
               <div key={i.id} className="pick-row">

@@ -52,11 +52,11 @@ const r1 = (v: number) => (Math.round(v * 10) / 10).toFixed(1);
  * Coverage window = order cycle + lead time, because an item that drops just after
  * an order day waits a full cycle before it is even ordered.
  * Each items: min = max(statistical min, days-of-supply floor); max = max(days-of-supply cap, min + one cycle of usage).
- * Box items: two-box rule; min = max(1, boxes needed over the window); max = min + 1.
+ * Everything is in pieces. Box-bought items: max ≥ min + one box, and orders round up to whole boxes.
  */
 export function minMax(item: Item, s: Settings): MinMax {
   const isBox = item.mode === 'box';
-  const empty: MinMax = { perJob: true, isBox, min: 0, max: 0, calcMin: 0, daysMin: 0, overridden: false, boxWarn: false, steps: [], unit: isBox ? 'boxes' : 'units' };
+  const empty: MinMax = { perJob: true, isBox, min: 0, max: 0, calcMin: 0, daysMin: 0, overridden: false, boxWarn: false, steps: [], unit: 'pcs' };
   if (item.strategy === 'job') return empty;
 
   const level = serviceLevel(item, s);
@@ -72,52 +72,45 @@ export function minMax(item: Item, s: Settings): MinMax {
   const safety = z * sdDaily * Math.sqrt(window);
   const zTxt = z.toFixed(2);
 
-  if (isBox) {
-    const upb = Math.max(1, Number(item.units_per_box) || 1);
-    const boxDays = daily > 0 ? upb / daily : Infinity;
-    const units = demand + safety;
-    const minB = Math.max(1, Math.ceil(units / upb));
-    let min = minB;
-    let max = minB + 1;
-    const overridden = item.min_override != null || item.max_override != null;
-    if (item.min_override != null) min = Number(item.min_override);
-    if (item.max_override != null) max = Number(item.max_override);
-    return {
-      perJob: false, isBox: true, min, max, calcMin: minB, daysMin: 0, overridden,
-      boxWarn: minB > 1,
-      unit: 'boxes',
-      steps: [
-        { label: `Daily usage (${usage} ÷ 30)`, value: `${daily.toFixed(2)} units` },
-        { label: 'One box lasts', value: isFinite(boxDays) ? `${Math.round(boxDays)} days` : '—' },
-        { label: `Window: ${cycle}-day order cycle + ${lead}-day lead time`, value: `${window} days` },
-        { label: `Units needed (demand ${r1(demand)} + safety ${r1(safety)})`, value: r1(units) },
-        { label: `Min = max(1, round up ÷ ${upb})`, value: `${minB}` },
-        { label: 'Max = min + 1 box', value: `${minB + 1}` },
-      ],
-    };
-  }
-
+  const upb = isBox ? Math.max(1, Number(item.units_per_box) || 1) : 1;
   const calcMin = Math.ceil(demand + safety);
   const daysMin = Math.ceil(daily * Number(s.min_days_supply));
   const autoMin = Math.max(calcMin, daysMin);
   const daysMax = Math.ceil(daily * Number(s.max_days_supply));
-  const autoMax = Math.max(daysMax, autoMin + Math.ceil(daily * cycle), autoMin + 1);
+  // Bought by the box: max must leave room for at least one whole box above min, or every order overshoots.
+  const autoMax = Math.max(daysMax, autoMin + Math.ceil(daily * cycle), autoMin + upb);
   const overridden = item.min_override != null || item.max_override != null;
   const min = item.min_override != null ? Number(item.min_override) : autoMin;
   const max = item.max_override != null ? Number(item.max_override) : autoMax;
-  return {
-    perJob: false, isBox: false, min, max, calcMin, daysMin, overridden, boxWarn: false, unit: 'units',
-    steps: [
-      { label: `Daily usage (${usage} ÷ 30)`, value: daily.toFixed(2) },
-      { label: `Window: ${cycle}-day order cycle + ${lead}-day lead time`, value: `${window} days` },
-      { label: `Demand over window`, value: r1(demand) },
-      { label: `Safety stock (Z ${zTxt} × ${sdDaily.toFixed(2)} × √${window})`, value: r1(safety) },
-      { label: 'Statistical min (round up)', value: `${calcMin}` },
-      { label: `${s.min_days_supply}-day supply floor`, value: `${daysMin}` },
-      { label: 'Min = larger of the two', value: `${autoMin}` },
-      { label: `Max = larger of ${s.max_days_supply}-day supply or min + one cycle`, value: `${autoMax}` },
-    ],
-  };
+  const steps: Step[] = [
+    { label: `Daily usage (${usage} pcs ÷ 30)`, value: daily.toFixed(2) },
+    { label: `Window: ${cycle}-day order cycle + ${lead}-day lead time`, value: `${window} days` },
+    { label: `Demand over window`, value: r1(demand) },
+    { label: `Safety stock (Z ${zTxt} × ${sdDaily.toFixed(2)} × √${window})`, value: r1(safety) },
+    { label: 'Statistical min (round up)', value: `${calcMin}` },
+    { label: `${s.min_days_supply}-day supply floor`, value: `${daysMin}` },
+    { label: 'Min = larger of the two', value: `${autoMin} pcs` },
+    { label: isBox ? `Max = larger of ${s.max_days_supply}-day supply, min + one cycle, or min + 1 box (${upb})` : `Max = larger of ${s.max_days_supply}-day supply or min + one cycle`, value: `${autoMax} pcs` },
+  ];
+  if (isBox) steps.push({ label: 'Orders round up to whole boxes of', value: `${upb} pcs` });
+  return { perJob: false, isBox, min, max, calcMin, daysMin, overridden, boxWarn: false, unit: 'pcs', steps };
+}
+
+/** What to order to get back to max, rounded up to whole boxes for box-bought items. */
+export function orderQty(item: Pick<Item, 'mode' | 'units_per_box'>, onHand: number, max: number) {
+  const need = Math.max(0, max - onHand);
+  if (item.mode !== 'box') return { pieces: Math.ceil(need), boxes: null as number | null };
+  const upb = Math.max(1, Number(item.units_per_box) || 1);
+  const boxes = Math.ceil(need / upb);
+  return { pieces: boxes * upb, boxes };
+}
+
+/** "3 boxes + 12" style display for box-bought items; plain pieces otherwise. */
+export function piecesLabel(item: Pick<Item, 'mode' | 'units_per_box'>, pcs: number) {
+  if (item.mode !== 'box' || !item.units_per_box || item.units_per_box <= 1) return `${pcs}`;
+  const b = Math.floor(pcs / item.units_per_box);
+  const loose = pcs - b * item.units_per_box;
+  return `${pcs} (${b} bx${loose ? ` + ${loose}` : ''})`;
 }
 
 export interface SpareCheck {

@@ -15,7 +15,7 @@ Warehouse and truck inventory for Integrity Water Treatment: tech truck view, st
   - *Tech:* sees only their truck; can load, close jobs, transfer, confirm incoming transfers, and submit truck counts.
   - *Inventory manager:* everything techs can do, for every truck, plus items, prices, min/max, settings, truck assignment, adjustments, flags, reversals, and audits.
   - *Owner:* same as manager, plus managing owner accounts. Keep at least two people with manager or owner access.
-- **Min/max (weekly review):** min covers the order cycle + lead time and never drops below the days-of-supply floor (default 30 days); max is the days-of-supply cap (default 45 days) or min + one cycle, whichever is larger. Box items (fittings) use the two-box rule. Overrides require a note.
+- **Min/max (weekly review):** min covers the order cycle + lead time and never drops below the days-of-supply floor (default 30 days); max is the days-of-supply cap (default 45 days) or min + one cycle, whichever is larger. **Everything is in pieces.** Items bought by the box have a box qty: max is at least min + one box, reorders round up to whole boxes ("order 3 boxes (150 pcs)"), and receiving, loading and audits accept boxes (+ loose) and convert to pieces. Overrides require a note.
 - **Stock strategy:** *truck* (warehouse + truck par; default under the truck cost limit or critical), *warehouse* (stocked, issued to a job, never truck-stocked), *job* (bought per job, no min/max).
 - **Holding rate** = capital rate + shrink (+ Tier 4 obsolescence add-on). Utilities and insurance are excluded as fixed costs. Set these in **Settings**.
 - **Audits:** start the weekly audit, count each location blind (expected quantities are hidden until saved), review differences with reasons, then complete. Differences post as adjustment tickets automatically. The audit history shows variance % and shrink $ week over week.
@@ -30,7 +30,7 @@ Twice a year: January = full list, July = top items by spend.
 4. **Enter by hand** for suppliers who write on the PDF.
 5. **Compare:** best list and bulk $/pc per item, current supplier price, gap %, and overpaying $/yr = (current − best list) × annual pieces, sorted by overpaying. Rows at or above the gap flag (Settings, default 10%) are highlighted. Expand a row to **Set as current supplier**, **Save bulk price**, or **Run bulk check**.
 
-**Units:** quotes are compared per piece. For box-tracked items the app divides the per-box cost by pieces per box, and converts back when you set a supplier or save a bulk price (price breaks for box items are stored in boxes).
+**Quote sheet columns:** SKU, Description, Est. annual qty, Box qty, **Retail price each (1-off)**, **Bulk price each**, **Bulk qty (pcs)**, Bulk savings % (formula), Notes. Every item is pre-selected. Retail is the price of one piece bought on its own, so bulk savings % = 1 − bulk ÷ retail. Costs, quotes and price breaks are all per piece; **Set as current supplier** also adopts that supplier's box qty.
 
 **Price changes are logged:** every change to an item's cost, supplier, or price breaks — from quotes or from the item screen — is written to `price_change_log` by a database trigger. The Compare view shows the latest changes.
 

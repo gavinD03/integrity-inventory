@@ -44,7 +44,8 @@ export function quoteFieldFor(header: Cell): QuoteField | null {
   if (h.includes('annual')) return 'annual';
   if (h.includes('bulk') && (h.includes('qty') || h.includes('quantity'))) return 'bulk_qty';
   if (h.includes('bulk') && h.includes('price')) return 'bulk_price';
-  if (h.includes('pieces per') || h.includes('pcs per') || h.includes('pack size') || h.includes('per box pack') && !h.includes('price')) return 'pieces';
+  if (h.includes('retail') || h.includes('1 off') || h.includes('one off') || h === 'each' || h === 'price each') return 'list_piece';
+  if (h.includes('box qty') || h.includes('box quantity') || h.includes('pieces per') || h.includes('pcs per') || h.includes('pack size') || (h.includes('per box pack') && !h.includes('price'))) return 'pieces';
   if (h.includes('list price') && (h.includes('piece') || h.includes('pc')) && !h.includes('box') && !h.includes('pack')) return 'list_piece';
   if (h.includes('list price') || h === 'price') return 'list_pack';
   if (h.startsWith('note') || h === 'comments') return 'notes';
@@ -57,6 +58,7 @@ export interface ParsedQuoteRow {
   description_raw: string;
   pieces_per_pack: number | null;
   list_pack_price: number | null;
+  list_unit_price: number | null; // retail (1-off) price per piece; computed from pack price on older sheets
   bulk_qty: number | null;
   bulk_unit_price: number | null;
   notes: string;
@@ -87,7 +89,7 @@ export function parseQuoteRows(rows: Cell[][]): ParsedQuote {
     const sku = cellText(get('sku'));
     const desc = cellText(get('description'));
     const raw = {
-      pieces: get('pieces'), list: get('list_pack'), bq: get('bulk_qty'), bp: get('bulk_price'),
+      pieces: get('pieces'), list: get('list_pack'), retail: get('list_piece'), bq: get('bulk_qty'), bp: get('bulk_price'),
     };
     const blank = (v: Cell) => v == null || cellText(v) === '';
     if (!sku && !desc && Object.values(raw).every(blank)) continue; // empty sheet row
@@ -103,12 +105,15 @@ export function parseQuoteRows(rows: Cell[][]): ParsedQuote {
     if (pieces === 0) { issues.push('Pieces per pack is 0'); pieces = null; }
     let bulkQty = num(raw.bq, 'Bulk qty');
     if (bulkQty === 0) { issues.push('Bulk qty is 0'); bulkQty = null; }
+    const packPrice = num(raw.list, 'List price');
+    const retail = num(raw.retail, 'Retail price');
     out.push({
       row: r + 1,
       sku_raw: sku,
       description_raw: desc,
       pieces_per_pack: pieces,
-      list_pack_price: num(raw.list, 'List price'),
+      list_pack_price: packPrice,
+      list_unit_price: retail ?? (packPrice != null && pieces ? packPrice / pieces : null),
       bulk_qty: bulkQty,
       bulk_unit_price: num(raw.bp, 'Bulk price'),
       notes: cellText(get('notes')),
@@ -128,22 +133,27 @@ export interface QuoteCheckContext {
 
 /** Warnings shown in the upload preview and manual entry. Never blockers. */
 export function quoteWarnings(
-  l: Pick<ParsedQuoteRow, 'pieces_per_pack' | 'list_pack_price' | 'bulk_qty' | 'bulk_unit_price'>,
+  l: Pick<ParsedQuoteRow, 'pieces_per_pack' | 'list_unit_price' | 'bulk_qty' | 'bulk_unit_price'> & { list_pack_price?: number | null },
   ctx: QuoteCheckContext,
 ): string[] {
   const w: string[] = [];
-  const perPiece = l.list_pack_price != null && l.pieces_per_pack ? l.list_pack_price / l.pieces_per_pack : null;
-  if (l.list_pack_price != null && !l.pieces_per_pack) w.push('List price but no pieces per pack — per-piece price can’t be computed');
-  if (perPiece != null && l.bulk_unit_price != null && l.bulk_unit_price >= perPiece) w.push('Bulk price is not below the list per-piece price');
+  const retail = l.list_unit_price;
+  if (retail == null && l.list_pack_price != null && !l.pieces_per_pack) w.push('Pack price but no box qty — per-piece price can’t be computed');
+  if (retail == null && l.bulk_unit_price != null) w.push('Bulk price but no retail (1-off) price — savings % can’t be computed');
+  if (retail != null && l.bulk_unit_price != null && l.bulk_unit_price >= retail) w.push('Bulk price is not below the retail price');
   if ((l.bulk_qty == null) !== (l.bulk_unit_price == null)) w.push('Bulk qty and bulk price should both be filled');
   if (ctx.itemMode === 'box' && l.pieces_per_pack && ctx.itemUnitsPerBox && l.pieces_per_pack !== ctx.itemUnitsPerBox) {
-    w.push(`Supplier packs ${l.pieces_per_pack}, we have ${ctx.itemUnitsPerBox} on file`);
+    w.push(`Their box is ${l.pieces_per_pack}, ours on file is ${ctx.itemUnitsPerBox} (switching to them changes the box size)`);
   }
-  if (perPiece != null && ctx.bestOtherPerPiece != null && ctx.bestOtherPerPiece > 0 && perPiece < ctx.bestOtherPerPiece * 0.5) {
+  if (retail != null && ctx.bestOtherPerPiece != null && ctx.bestOtherPerPiece > 0 && retail < ctx.bestOtherPerPiece * 0.5) {
     w.push('More than 50% below the current best — possible lower-grade equivalent, confirm brand');
   }
   return w;
 }
+
+/** Bulk savings vs buying one: 1 − bulk ÷ retail, as a percent. */
+export const bulkSavingsPct = (retail: number | null | undefined, bulk: number | null | undefined) =>
+  retail != null && bulk != null && retail > 0 ? (1 - bulk / retail) * 100 : null;
 
 // ── Items master sheet (IWT_Inventory_Master.xlsx → Items tab) ─────────────
 

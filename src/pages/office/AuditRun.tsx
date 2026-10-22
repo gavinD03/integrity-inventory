@@ -60,9 +60,15 @@ export default function AuditRun() {
     if (!audit) return;
     setBusy(true); setError(null); setMsg(null);
     try {
-      const toSave = Object.entries(entry).filter(([, v]) => v !== '');
-      for (const [itemId, v] of toSave) {
-        must(await supabase.rpc('save_count', { p_audit: audit.id, p_item: itemId, p_location: loc, p_counted: Number(v), p_reason: reasons[`${itemId}:${loc}`] ?? null }));
+      const ids = [...new Set(Object.entries(entry).filter(([, v]) => v !== '').map(([k]) => k.split(':')[0]))];
+      const toSave = ids.map((itemId) => {
+        const it = itemById(itemId);
+        const main = Number(entry[itemId] || 0);
+        const pcs = it?.mode === 'box' ? main * (it.units_per_box || 1) + Number(entry[`${itemId}:loose`] || 0) : main;
+        return [itemId, pcs] as const;
+      });
+      for (const [itemId, pcs] of toSave) {
+        must(await supabase.rpc('save_count', { p_audit: audit.id, p_item: itemId, p_location: loc, p_counted: pcs, p_reason: reasons[`${itemId}:${loc}`] ?? null }));
       }
       setEntry({});
       setMsg(`Saved ${toSave.length} counts for ${location?.name}.`);
@@ -142,18 +148,28 @@ export default function AuditRun() {
           </div>
           <div className="tbl">
             <table>
-              <thead><tr><th>Item</th><th>Tier</th><th className="num">Counted</th><th className="num">Saved count</th></tr></thead>
+              <thead><tr><th>Item</th><th>Tier</th><th className="num">Counted</th><th className="num">Saved (pcs)</th></tr></thead>
               <tbody>
                 {list.length === 0 && <tr><td colSpan={4} className="muted" style={{ padding: 20 }}>No items to count here.</td></tr>}
                 {list.map((i) => {
                   const saved = countFor(i.id, loc);
                   return (
                     <tr key={i.id}>
-                      <td><div style={{ fontWeight: 600 }}>{i.name}</div><div className="small muted">{i.mode === 'box' ? 'Count sealed boxes' : 'Count units'}</div></td>
+                      <td><div style={{ fontWeight: 600 }}>{i.name}</div><div className="small muted">{i.mode === 'box' ? `Full boxes of ${i.units_per_box ?? '?'} + loose pieces` : 'Count pieces'}</div></td>
                       <td className="mono">T{i.tier}</td>
                       <td className="num">
-                        <input className="inp" type="number" inputMode="numeric" min={0} aria-label={`Count of ${i.name}`} style={{ width: 100, textAlign: 'right' }}
-                          value={entry[i.id] ?? ''} onChange={(e) => setEntry({ ...entry, [i.id]: e.target.value })} />
+                        {i.mode === 'box' ? (
+                          <span className="row" style={{ gap: 6, justifyContent: 'flex-end', flexWrap: 'nowrap' }}>
+                            <input className="inp" type="number" inputMode="numeric" min={0} aria-label={`Full boxes of ${i.name}`} placeholder="boxes" style={{ width: 80, textAlign: 'right' }}
+                              value={entry[i.id] ?? ''} onChange={(e) => setEntry({ ...entry, [i.id]: e.target.value })} />
+                            <span className="small muted">+</span>
+                            <input className="inp" type="number" inputMode="numeric" min={0} aria-label={`Loose pieces of ${i.name}`} placeholder="loose" style={{ width: 80, textAlign: 'right' }}
+                              value={entry[`${i.id}:loose`] ?? ''} onChange={(e) => setEntry({ ...entry, [`${i.id}:loose`]: e.target.value })} />
+                          </span>
+                        ) : (
+                          <input className="inp" type="number" inputMode="numeric" min={0} aria-label={`Count of ${i.name}`} style={{ width: 100, textAlign: 'right' }}
+                            value={entry[i.id] ?? ''} onChange={(e) => setEntry({ ...entry, [i.id]: e.target.value })} />
+                        )}
                       </td>
                       <td className="num">{saved ? Number(saved.counted) : '—'}</td>
                     </tr>

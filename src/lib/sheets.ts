@@ -65,13 +65,13 @@ export interface RequestMeta {
 }
 
 export const SHEET_HEADERS = [
-  'SKU', 'Description', 'Est. annual qty (pcs)', 'Pieces per box/pack', 'List price per box/pack',
-  'List price per piece', 'Bulk qty (pcs)', 'Bulk price per piece', 'Notes',
+  'SKU', 'Description', 'Est. annual qty (pcs)', 'Box qty (pcs)', 'Retail price each (1-off)',
+  'Bulk price each', 'Bulk qty (pcs)', 'Bulk savings %', 'Notes',
 ];
 
 export const INSTRUCTIONS =
   'Please fill in the shaded columns for each item you carry and return this file. Leave a row blank if you don’t carry the item. ' +
-  'Pieces per box/pack = how you sell it; List price = price for that box/pack; Bulk qty = pieces needed for the bulk price; Bulk price = per piece.';
+  'Box qty = pieces in a standard box. Retail = price for ONE piece bought on its own. Bulk price = price per piece at the bulk quantity. Bulk qty = pieces needed for that price.';
 
 /** Excel reply sheet. Layout must stay in sync with parseQuoteRows (header row is found by scanning for "SKU"). */
 export async function buildQuoteWorkbook(meta: RequestMeta, items: RequestItem[]): Promise<Blob> {
@@ -100,20 +100,20 @@ export async function buildQuoteWorkbook(meta: RequestMeta, items: RequestItem[]
   head.height = 32;
   head.eachCell((c) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF16201C' } }; });
 
-  const fillable = [4, 5, 7, 8, 9];
+  const fillable = [4, 5, 6, 7, 9];
   items.forEach((it, idx) => {
     const r = 6 + idx;
     const row = ws.getRow(r);
     row.getCell(1).value = it.sku;
     row.getCell(2).value = it.name;
     row.getCell(3).value = it.annual ?? null;
-    row.getCell(6).value = { formula: `IF(AND(ISNUMBER(D${r}),D${r}>0,ISNUMBER(E${r})),E${r}/D${r},"")` };
+    row.getCell(8).value = { formula: `IF(AND(ISNUMBER(E${r}),E${r}>0,ISNUMBER(F${r})),1-F${r}/E${r},"")` };
     for (const c of fillable) row.getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF6D8' } };
-    row.getCell(5).numFmt = '$#,##0.00';
-    row.getCell(6).numFmt = '$#,##0.0000';
-    row.getCell(8).numFmt = '$#,##0.0000';
+    row.getCell(5).numFmt = '$#,##0.00##';
+    row.getCell(6).numFmt = '$#,##0.00##';
+    row.getCell(8).numFmt = '0.0%';
   });
-  const widths = [16, 44, 14, 14, 16, 14, 12, 14, 30];
+  const widths = [16, 44, 14, 12, 16, 14, 12, 12, 30];
   widths.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
 
   const buf = await wb.xlsx.writeBuffer();
@@ -135,7 +135,7 @@ export async function buildQuotePdf(meta: RequestMeta, items: RequestItem[]): Pr
   doc.text(`Date: ${meta.date}`, 300, 64);
   doc.text(`Round: ${meta.round}`, 480, 64);
   const instr = doc.splitTextToSize(
-    'Please write in the pieces per box/pack, list price for that box/pack, and (if offered) the bulk quantity in pieces and bulk price per piece. ' +
+    'For each item please write the box qty (pieces per box), the retail price for ONE piece, and (if offered) the bulk price per piece and the bulk quantity in pieces. ' +
     'Leave a row blank if you don’t carry the item. An Excel version of this sheet is attached — replying in Excel is fastest.',
     W - 80,
   );
@@ -143,7 +143,7 @@ export async function buildQuotePdf(meta: RequestMeta, items: RequestItem[]): Pr
 
   autoTable(doc, {
     startY: 82 + instr.length * 12 + 6,
-    head: [['SKU', 'Description', 'Est. annual qty', 'Pieces per box/pack', 'List price per box/pack', 'Bulk qty (pcs)', 'Bulk price per piece', 'Notes']],
+    head: [['SKU', 'Description', 'Est. annual qty', 'Box qty (pcs)', 'Retail each (1-off)', 'Bulk price each', 'Bulk qty (pcs)', 'Notes']],
     body: items.map((i) => [i.sku, i.name, i.annual == null ? '' : String(i.annual), '', '', '', '', '']),
     theme: 'grid',
     showHead: 'everyPage',

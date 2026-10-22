@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bulkCheck, minMax, zFor } from './calc';
+import { bulkCheck, minMax, orderQty, piecesLabel, zFor } from './calc';
 import type { Item, Settings } from './types';
 
 const settings: Settings = {
@@ -46,10 +46,16 @@ describe('minMax', () => {
     expect(r.min).toBe(Math.max(r.calcMin, 10));
     expect(r.max).toBeGreaterThanOrEqual(15);
   });
-  it('box items follow the two-box rule', () => {
-    const r = minMax({ ...base, mode: 'box', units_per_box: 50, monthly_usage: 40, usage_sd: 15, tier: 1 }, settings);
-    expect(r.min).toBe(1);
-    expect(r.max).toBe(2);
+  it('box items: min/max in pieces, max at least min + one box, orders round up to whole boxes', () => {
+    const it = { ...base, mode: 'box' as const, units_per_box: 50, monthly_usage: 40, usage_sd: 15, tier: 1 as const };
+    const r = minMax(it, settings);
+    expect(r.min).toBe(Math.max(r.calcMin, 40));
+    expect(r.max).toBeGreaterThanOrEqual(r.min + 50);
+    const o = orderQty(it, 10, r.max);
+    expect(o.pieces % 50).toBe(0);
+    expect(o.pieces).toBeGreaterThanOrEqual(r.max - 10);
+    expect(o.boxes).toBe(o.pieces / 50);
+    expect(piecesLabel(it, 112)).toBe('112 (2 bx + 12)');
   });
   it('buy-per-job items have no min/max', () => {
     expect(minMax({ ...base, strategy: 'job' }, settings).perJob).toBe(true);

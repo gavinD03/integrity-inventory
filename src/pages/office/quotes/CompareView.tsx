@@ -62,12 +62,11 @@ export default function CompareView({ round, quotes, lines, reload, loading }: {
   }
 
   function bulkCheck(item: Item, c: SupplierCell) {
-    const upb = item.mode === 'box' ? item.units_per_box || 1 : 1;
     const q = new URLSearchParams({
       item: item.id,
-      np: String((c.list ?? 0) * upb),
-      bp: String((c.bulk ?? 0) * upb),
-      bq: String(Math.ceil((c.bulkQty ?? 0) / upb)),
+      np: String(c.list ?? 0),
+      bp: String(c.bulk ?? 0),
+      bq: String(c.bulkQty ?? 0),
       from: `${supplierName(c.supplierId)} · ${round.label}`,
     });
     nav(`/bulk?${q}`);
@@ -85,7 +84,7 @@ export default function CompareView({ round, quotes, lines, reload, loading }: {
       <div className="stats">
         <div className="stat"><div className="label">Quotes saved</div><div className="value">{savedIds.length}/{inRound.length}</div><div className="small muted">{quotes.filter((q) => q.status !== 'saved').map((q) => supplierName(q.supplier_id)).join(', ') || 'All in'}</div></div>
         <div className="stat"><div className="label">Flagged items</div><div className={`value ${rows.some((r) => r.flagged) ? 'warn' : ''}`}>{rows.filter((r) => r.flagged).length}</div><div className="small muted">Current ≥ {settings.quote_gap_flag_pct}% above best</div></div>
-        <div className="stat"><div className="label">Overpaying</div><div className="value">{money(totalOver)}/yr</div><div className="small muted">At current supplier vs best list</div></div>
+        <div className="stat"><div className="label">Overpaying</div><div className="value">{money(totalOver)}/yr</div><div className="small muted">Current supplier vs best retail price</div></div>
       </div>
 
       <section className="card flush">
@@ -123,7 +122,7 @@ export default function CompareView({ round, quotes, lines, reload, loading }: {
           <table>
             <thead>
               <tr>
-                <th>Item</th><th className="num">Annual pcs</th><th className="num">Best list $/pc</th><th className="num">Best bulk $/pc</th>
+                <th>Item</th><th className="num">Annual pcs</th><th className="num">Best retail $/pc</th><th className="num">Best bulk $/pc</th>
                 <th className="num">Current $/pc</th><th className="num">Gap</th><th className="num">Overpaying $/yr</th><th></th>
               </tr>
             </thead>
@@ -139,7 +138,7 @@ export default function CompareView({ round, quotes, lines, reload, loading }: {
                     </td>
                     <td className="num">{Math.round(r.annual) || '—'}</td>
                     <td className="num">{r.bestList ? <>{fmt$(r.bestList.price, 4)}<div className="small muted" style={{ fontFamily: 'inherit' }}>{supplierName(r.bestList.supplierId)}</div></> : '—'}</td>
-                    <td className="num">{r.bestBulk ? <>{fmt$(r.bestBulk.price, 4)}<div className="small muted" style={{ fontFamily: 'inherit' }}>{supplierName(r.bestBulk.supplierId)} · {r.bestBulk.qty} pcs</div></> : '—'}</td>
+                    <td className="num">{r.bestBulk ? <>{fmt$(r.bestBulk.price, 4)}{r.bestBulk.savingsPct != null && <span className="small" style={{ color: 'var(--accent-ink)' }}> −{r.bestBulk.savingsPct.toFixed(1)}%</span>}<div className="small muted" style={{ fontFamily: 'inherit' }}>{supplierName(r.bestBulk.supplierId)} · {r.bestBulk.qty} pcs</div></> : '—'}</td>
                     <td className="num">{r.currentPrice != null ? <>{fmt$(r.currentPrice, 4)}<div className="small muted" style={{ fontFamily: 'inherit' }}>{r.currentSupplierId ? supplierName(r.currentSupplierId) : 'No supplier set'}{r.currentSource === 'item' ? ' · on file' : ''}</div></> : '—'}</td>
                     <td className="num">{r.gapPct == null ? '—' : <span className={r.flagged ? 'pill warn' : ''}>{r.gapPct >= 0 ? '+' : ''}{r.gapPct.toFixed(1)}%</span>}</td>
                     <td className="num" style={{ fontWeight: r.overpay > 0 ? 600 : undefined }}>{r.overpay > 0 ? money(r.overpay) : '—'}</td>
@@ -163,7 +162,7 @@ export default function CompareView({ round, quotes, lines, reload, loading }: {
 
       <div className="split">
         <section className="main card" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <h2>Spend per supplier at list price</h2>
+          <h2>Spend per supplier at retail price</h2>
           <p className="small muted" style={{ margin: 0 }}>
             Only the <b>common items</b> column is a fair comparison: it counts the {spend.commonCount} items every selected supplier quoted. “All quoted” favors suppliers who quoted fewer or cheaper items.
           </p>
@@ -235,7 +234,7 @@ function SupplierDetail({ row, onSetCurrent, onSaveBulk, onBulkCheck }: {
   const cells = Object.values(row.cells);
   return (
     <table style={{ width: '100%', minWidth: 0 }}>
-      <thead><tr><th>Supplier</th><th className="num">List $/pc</th><th className="num">Bulk $/pc</th><th className="num">Bulk qty (pcs)</th><th>Notes</th><th></th></tr></thead>
+      <thead><tr><th>Supplier</th><th className="num">Retail each</th><th className="num">Bulk each</th><th className="num">Bulk qty (pcs)</th><th className="num">Bulk savings</th><th className="num">Box qty</th><th>Notes</th><th></th></tr></thead>
       <tbody>
         {cells.map((c) => (
           <tr key={c.supplierId}>
@@ -245,9 +244,11 @@ function SupplierDetail({ row, onSetCurrent, onSaveBulk, onBulkCheck }: {
             </td>
             {c.state === 'quoted' ? (
               <>
-                <td className="num">{fmt$(c.list, 4)}{c.line?.pieces_per_pack ? <div className="small muted" style={{ fontFamily: 'inherit' }}>{fmt$(c.line.list_pack_price)} / {c.line.pieces_per_pack}</div> : null}</td>
+                <td className="num">{fmt$(c.list, 4)}</td>
                 <td className="num">{fmt$(c.bulk, 4)}</td>
                 <td className="num">{c.bulkQty ?? '—'}</td>
+                <td className="num">{c.list && c.bulk != null ? `${((1 - c.bulk / c.list) * 100).toFixed(1)}%` : '—'}</td>
+                <td className="num">{c.line?.pieces_per_pack ?? '—'}</td>
                 <td className="small">{c.line?.notes ?? ''}</td>
                 <td>
                   <div className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
@@ -258,7 +259,7 @@ function SupplierDetail({ row, onSetCurrent, onSaveBulk, onBulkCheck }: {
                 </td>
               </>
             ) : (
-              <td colSpan={5} className="small muted">{c.state === 'asked' ? 'Asked, not quoted' : 'Not asked'}</td>
+              <td colSpan={7} className="small muted">{c.state === 'asked' ? 'Asked, not quoted' : 'Not asked'}</td>
             )}
           </tr>
         ))}

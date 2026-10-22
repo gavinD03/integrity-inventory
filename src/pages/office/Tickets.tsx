@@ -212,7 +212,7 @@ export default function Tickets() {
           {items.map((i) => (
             <div key={i.id} className="pick-row">
               <div className="grow"><div style={{ fontWeight: 600 }}>{i.name}</div></div>
-              <Stepper value={adj.lines[i.id] ?? 0} suffix={i.mode === 'box' ? ' bx' : ''} onChange={(v) => setAdj({ ...adj, lines: { ...adj.lines, [i.id]: v } })} />
+              <Stepper value={adj.lines[i.id] ?? 0} suffix=" pcs" onChange={(v) => setAdj({ ...adj, lines: { ...adj.lines, [i.id]: v } })} />
             </div>
           ))}
         </Sheet>

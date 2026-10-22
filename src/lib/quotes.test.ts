@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { bulkCheck } from './calc';
-import { normSku, parseItemRows, parseMinMax, parseQuoteRows, quoteWarnings, type Cell } from './quoteParse';
+import { bulkSavingsPct, normSku, parseItemRows, parseMinMax, parseQuoteRows, quoteWarnings, type Cell } from './quoteParse';
 import { buildComparison, supplierSpend, topBySpend } from './quoteCompare';
 import { buildQuotePdf, buildQuoteWorkbook, readSheet, SHEET_HEADERS } from './sheets';
 import type { Item, QuoteLine, Supplier, SupplierQuote } from './types';
@@ -24,17 +24,17 @@ describe('parseQuoteRows', () => {
   it('finds the header on row 4 or 6 and ignores column order and unknown columns', () => {
     for (const offset of [3, 5]) {
       const rows: Cell[][] = Array.from({ length: offset }, () => ['junk']);
-      const shuffled = ['Notes', 'Bulk price per piece', 'SKU', ' list PRICE per box/pack ', 'Pieces per box/pack', 'Description', 'Bulk qty (pcs)', 'Mystery'];
+      const shuffled = ['Notes', 'Bulk price each', 'SKU', ' RETAIL price each (1-off) ', 'Box qty (pcs)', 'Description', 'Bulk qty (pcs)', 'Mystery'];
       rows.push(shuffled);
-      rows.push(['ok', 0.9, 'abc-1', '$50.00', 50, 'Elbow', 500, 'x']);
+      rows.push(['ok', 0.9, 'abc-1', '$1.10', 50, 'Elbow', 500, 'x']);
       const p = parseQuoteRows(rows);
       expect(p.headerRow).toBe(offset + 1);
       expect(p.rows).toHaveLength(1);
-      expect(p.rows[0]).toMatchObject({ sku_raw: 'abc-1', pieces_per_pack: 50, list_pack_price: 50, bulk_qty: 500, bulk_unit_price: 0.9, notes: 'ok' });
+      expect(p.rows[0]).toMatchObject({ sku_raw: 'abc-1', pieces_per_pack: 50, list_unit_price: 1.1, bulk_qty: 500, bulk_unit_price: 0.9, notes: 'ok' });
     }
   });
   it('skips blank rows, keeps partial rows with warnings', () => {
-    const rows: Cell[][] = [head, ['A', 'a', 10, '', '', '', '', '', ''], ['B', 'b', 10, 25, '12.5', null, '', '', ''], ['C', 'c', 10, 'box', 'call', null, '', '', '']];
+    const rows: Cell[][] = [head, ['A', 'a', 10, '', '', '', '', '', ''], ['B', 'b', 10, 25, '0.5', null, '', '', ''], ['C', 'c', 10, 'box', 'call', null, '', '', '']];
     const p = parseQuoteRows(rows);
     expect(p.skipped).toBe(1);
     expect(p.rows.map((r) => r.sku_raw)).toEqual(['B', 'C']);
@@ -47,10 +47,11 @@ describe('parseQuoteRows', () => {
 
 describe('quoteWarnings', () => {
   it('flags the spec cases', () => {
-    expect(quoteWarnings({ pieces_per_pack: null, list_pack_price: 10, bulk_qty: null, bulk_unit_price: null }, {})[0]).toMatch(/no pieces/);
-    expect(quoteWarnings({ pieces_per_pack: 10, list_pack_price: 10, bulk_qty: 100, bulk_unit_price: 1 }, {}).join()).toMatch(/not below/);
-    expect(quoteWarnings({ pieces_per_pack: 25, list_pack_price: 10, bulk_qty: null, bulk_unit_price: null }, { itemMode: 'box', itemUnitsPerBox: 50 }).join()).toMatch(/packs 25, we have 50/);
-    expect(quoteWarnings({ pieces_per_pack: 1, list_pack_price: 4, bulk_qty: null, bulk_unit_price: null }, { bestOtherPerPiece: 10 }).join()).toMatch(/lower-grade/);
+    expect(quoteWarnings({ pieces_per_pack: 10, list_unit_price: 1, bulk_qty: 100, bulk_unit_price: 1 }, {}).join()).toMatch(/not below/);
+    expect(quoteWarnings({ pieces_per_pack: null, list_unit_price: null, bulk_qty: 100, bulk_unit_price: 1 }, {}).join()).toMatch(/no retail/);
+    expect(quoteWarnings({ pieces_per_pack: 25, list_unit_price: 0.4, bulk_qty: null, bulk_unit_price: null }, { itemMode: 'box', itemUnitsPerBox: 50 }).join()).toMatch(/box is 25, ours on file is 50/);
+    expect(quoteWarnings({ pieces_per_pack: 1, list_unit_price: 4, bulk_qty: null, bulk_unit_price: null }, { bestOtherPerPiece: 10 }).join()).toMatch(/lower-grade/);
+    expect(bulkSavingsPct(131, 122.22)).toBeCloseTo(6.7, 1);
   });
 });
 
@@ -81,7 +82,7 @@ describe('comparison', () => {
   ];
   const items = [
     item({ id: 'e1', sku: 'E1', unit_cost: 12, monthly_usage: 10, supplier_id: 'A' }),
-    item({ id: 'b1', sku: 'B1', mode: 'box', units_per_box: 50, unit_cost: 25, monthly_usage: 100 }), // $0.50/pc on file
+    item({ id: 'b1', sku: 'B1', mode: 'box', units_per_box: 50, unit_cost: 0.5, monthly_usage: 100 }), // $0.50/pc on file
     item({ id: 'x1', sku: 'X1', unit_cost: 5, monthly_usage: 1 }),
   ];
   const lines = [
@@ -96,6 +97,7 @@ describe('comparison', () => {
   it('picks best list and bulk with supplier and qty', () => {
     expect(r('e1').bestList).toMatchObject({ price: 10, supplierId: 'B' });
     expect(r('e1').bestBulk).toMatchObject({ price: 9, supplierId: 'B', qty: 100 });
+    expect(r('e1').bestBulk!.savingsPct).toBeCloseTo(10, 6);
   });
   it('uses the current supplier quote and computes gap and overpay = (current − best) × annual', () => {
     expect(r('e1').currentPrice).toBe(12);
@@ -104,7 +106,7 @@ describe('comparison', () => {
     expect(r('e1').overpay).toBeCloseTo((12 - 10) * 120, 5);
     expect(r('e1').flagged).toBe(true);
   });
-  it('normalizes box items to per-piece cost', () => {
+  it('box items are priced per piece', () => {
     expect(r('b1').currentPrice).toBeCloseTo(0.5, 6);
     expect(r('b1').overpay).toBeCloseTo((0.5 - 0.4) * 1200, 6);
   });
@@ -143,9 +145,9 @@ describe('generated sheet round-trip', () => {
     items.forEach((_, n) => {
       const row = ws.getRow(6 + n);
       row.getCell(4).value = 10;
-      row.getCell(5).value = 25 + n;
+      row.getCell(5).value = 2.5 + n;
+      row.getCell(6).value = 2;
       row.getCell(7).value = 100;
-      row.getCell(8).value = 2;
     });
     const filled = new File([await wb.xlsx.writeBuffer()], 'reply.xlsx');
     const parsed = parseQuoteRows(await readSheet(filled));
@@ -153,7 +155,7 @@ describe('generated sheet round-trip', () => {
     expect(parsed.rows).toHaveLength(34);
     const skus = new Set(items.map((i) => normSku(i.sku)));
     expect(parsed.rows.every((r) => skus.has(normSku(r.sku_raw)))).toBe(true);
-    expect(parsed.rows[3]).toMatchObject({ pieces_per_pack: 10, list_pack_price: 28, bulk_qty: 100, bulk_unit_price: 2 });
+    expect(parsed.rows[3]).toMatchObject({ pieces_per_pack: 10, list_unit_price: 5.5, bulk_qty: 100, bulk_unit_price: 2 });
   });
 
   it('builds a multi-page PDF', async () => {

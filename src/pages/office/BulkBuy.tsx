@@ -19,14 +19,14 @@ export default function BulkBuy() {
   const defaults = useMemo<BulkInput | null>(() => {
     if (!item) return null;
     const b = itemBreaks[Math.min(breakIdx, itemBreaks.length - 1)];
-    // Work in the item's stock unit: boxes for box items (usage is stored in pieces).
+    // Everything in pieces; a normal order is one month of usage rounded up to whole boxes.
     const upb = item.mode === 'box' ? item.units_per_box || 1 : 1;
-    const usage = (item.monthly_usage || 0) / upb || 1;
+    const usage = item.monthly_usage || 1;
     const q = (k: string) => { const v = params.get(k); return v != null && v !== '' && !isNaN(Number(v)) ? Number(v) : null; };
     const fromQuote = params.get('from') != null;
     return {
       normalPrice: (fromQuote ? q('np') : null) ?? item.unit_cost,
-      normalQty: Math.max(1, Math.round(usage) || 1),
+      normalQty: Math.max(upb, Math.ceil(usage / upb) * upb),
       bulkPrice: (fromQuote ? q('bp') : null) ?? (b ? b.unit_price : item.unit_cost),
       bulkQty: (fromQuote ? q('bq') : null) ?? (b ? b.min_qty : Math.max(1, Math.round(usage * 3))),
       usage,
@@ -55,7 +55,7 @@ export default function BulkBuy() {
       <div className="page-head">
         <div>
           <h1>Bulk-buy check</h1>
-          <p className="muted" style={{ margin: '6px 0 0' }}>Does the bulk price beat the cost of holding the extra stock?{item?.mode === 'box' ? ' Quantities and prices are per box.' : ''}</p>
+          <p className="muted" style={{ margin: '6px 0 0' }}>Does the bulk price beat the cost of holding the extra stock?{' Quantities and prices are per piece.'}</p>
           {params.get('from') && <p className="small" style={{ margin: '4px 0 0', color: 'var(--accent-ink)' }}>Pre-filled from quote: {params.get('from')}</p>}
         </div>
         <div className="field" style={{ minWidth: 280 }}>

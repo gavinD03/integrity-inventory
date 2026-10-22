@@ -1,10 +1,9 @@
 import { useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useData } from '../../lib/data';
-import { minMax } from '../../lib/calc';
+import { minMax, orderQty, piecesLabel } from '../../lib/calc';
 import { must, supabase } from '../../lib/supabase';
 import { parseCsvLine } from '../../lib/format';
-import type { Item } from '../../lib/types';
 import { ErrorMsg, Sheet, Stepper } from '../../components/ui';
 import ItemImport from '../../components/ItemImport';
 
@@ -29,7 +28,8 @@ export default function Dashboard() {
     const onTrucks = trucks.reduce((t, tr) => t + qty(i.id, tr.id), 0);
     const reorder = !mm.perJob && wh <= mm.min;
     const hasBreak = breaks.some((b) => b.item_id === i.id && b.min_qty > 1);
-    return { item: i, mm, wh, onTrucks, reorder, need: Math.max(0, mm.max - wh), hasBreak };
+    const order = orderQty(i, wh, mm.max);
+    return { item: i, mm, wh, onTrucks, reorder, order, hasBreak };
   }), [items, settings, qty, warehouse, trucks, breaks]);
 
   const visible = rows.filter((r) => {
@@ -42,21 +42,14 @@ export default function Dashboard() {
   });
   const reorders = rows.filter((r) => r.reorder);
 
-  async function boxMove(i: Item, delta: number) {
-    if (!warehouse) return;
-    setError(null);
-    const res = await supabase.rpc('submit_ticket', delta < 0
-      ? { p_type: 'adjust', p_from: warehouse.id, p_to: null, p_lines: [{ item_id: i.id, qty: 1 }], p_note: 'Box used or scrapped' }
-      : { p_type: 'receive', p_from: null, p_to: warehouse.id, p_lines: [{ item_id: i.id, qty: 1 }], p_note: 'Box received' });
-    if (res.error) setError(res.error.message);
-    await refresh();
-  }
-
   async function submitReceive() {
     if (!warehouse) return;
     setBusy(true); setError(null);
     try {
-      const lines = Object.entries(recv).filter(([, q]) => q > 0).map(([item_id, q]) => ({ item_id, qty: q }));
+      const lines = Object.entries(recv).filter(([, q]) => q > 0).map(([item_id, q]) => {
+        const it = items.find((x) => x.id === item_id);
+        return { item_id, qty: it?.mode === 'box' ? q * (it.units_per_box || 1) : q };
+      });
       must(await supabase.rpc('submit_ticket', { p_type: 'receive', p_from: null, p_to: warehouse.id, p_lines: lines, p_note: 'Supplier delivery' }));
       setReceiving(false); setRecv({});
       setMsg('Delivery received into the warehouse.');
@@ -125,7 +118,7 @@ export default function Dashboard() {
 
       <div className="stats">
         <div className="stat"><div className="label">Need reorder</div><div className={`value ${reorders.length ? 'warn' : ''}`}>{reorders.length}</div><div className="small muted">Warehouse at or below min</div></div>
-        <div className="stat"><div className="label">Stocked items</div><div className="value">{stockable.length}</div><div className="small muted">{items.filter((i) => i.mode === 'box').length} counted in boxes</div></div>
+        <div className="stat"><div className="label">Stocked items</div><div className="value">{stockable.length}</div><div className="small muted">{items.filter((i) => i.mode === 'box').length} bought by the box</div></div>
         <div className="stat"><div className="label">Buy per job</div><div className="value">{items.filter((i) => i.strategy === 'job').length}</div><div className="small muted">No min/max</div></div>
         <div className="stat"><div className="label">Order cycle</div><div className="value">{settings.order_cycle_days}d</div><div className="small muted">Min {settings.min_days_supply}d · max {settings.max_days_supply}d supply</div></div>
       </div>
@@ -135,7 +128,7 @@ export default function Dashboard() {
           <div className="card flush">
             <div className="row" style={{ padding: '14px 16px', borderBottom: '1px solid var(--line)' }}>
               <div className="chips">
-                {([['all', 'All'], ['reorder', 'Needs reorder'], ['each', 'Systems, filters + media'], ['box', 'Fittings (boxes)'], ['job', 'Buy per job']] as [Filter, string][]).map(([k, l]) => (
+                {([['all', 'All'], ['reorder', 'Needs reorder'], ['each', 'Systems, filters + media'], ['box', 'Bought by the box'], ['job', 'Buy per job']] as [Filter, string][]).map(([k, l]) => (
                   <button key={k} className="chip" aria-pressed={filter === k} onClick={() => setFilter(k)}>{l}</button>
                 ))}
               </div>
@@ -144,13 +137,13 @@ export default function Dashboard() {
             <div className="tbl">
               <table>
                 <thead>
-                  <tr><th>Item</th><th>Tier</th><th>Tracked</th><th className="num">Warehouse</th><th className="num">Trucks</th><th className="num">Min / Max</th><th>Status</th><th></th></tr>
+                  <tr><th>Item</th><th>Tier</th><th>Tracked</th><th className="num">Warehouse</th><th className="num">Trucks</th><th className="num">Min / Max (pcs)</th><th>Status</th></tr>
                 </thead>
                 <tbody>
                   {visible.length === 0 && (
-                    <tr><td colSpan={8} className="muted" style={{ padding: 20 }}>{items.length === 0 ? 'No items yet. Add one or import a CSV.' : 'No items match.'}</td></tr>
+                    <tr><td colSpan={7} className="muted" style={{ padding: 20 }}>{items.length === 0 ? 'No items yet. Add one or import a CSV.' : 'No items match.'}</td></tr>
                   )}
-                  {visible.map(({ item: i, mm, wh, onTrucks, reorder, need }) => (
+                  {visible.map(({ item: i, mm, wh, onTrucks, reorder, order }) => (
                     <tr key={i.id} className="click" onClick={() => nav(`/items/${i.id}`)}>
                       <td>
                         <div style={{ fontWeight: 600 }}>{i.name}</div>
@@ -159,22 +152,14 @@ export default function Dashboard() {
                         </div>
                       </td>
                       <td className="mono">T{i.tier}</td>
-                      <td>{i.mode === 'box' ? 'Boxes' : 'Each'}</td>
-                      <td className="num">{i.strategy === 'job' ? '—' : i.mode === 'box' ? `${wh} bx` : wh}</td>
-                      <td className="num">{i.mode === 'box' ? 'on load' : i.strategy === 'job' ? '—' : onTrucks}</td>
+                      <td>{i.mode === 'box' ? `Box of ${i.units_per_box ?? '?'}` : 'Each'}</td>
+                      <td className="num">{i.strategy === 'job' ? '—' : piecesLabel(i, wh)}</td>
+                      <td className="num">{i.strategy === 'job' ? '—' : onTrucks}</td>
                       <td className="num">{mm.perJob ? '—' : `${mm.min} / ${mm.max}`}</td>
                       <td>
                         {mm.perJob ? <span className="pill grey">Buy per job</span>
-                          : reorder ? <span className="pill warn">Reorder · {need}{i.mode === 'box' ? ' bx' : ''}</span>
+                          : reorder ? <span className="pill warn">Reorder · {order.boxes != null ? `${order.boxes} bx` : order.pieces}</span>
                           : <span className="pill ok">OK</span>}
-                      </td>
-                      <td onClick={(e) => e.stopPropagation()}>
-                        {i.mode === 'box' && (
-                          <div className="row" style={{ gap: 6, flexWrap: 'nowrap' }}>
-                            <button className="btn sm" aria-label={`Use or scrap one box of ${i.name}`} onClick={() => boxMove(i, -1)}>−1 box</button>
-                            <button className="btn sm" aria-label={`Receive one box of ${i.name}`} onClick={() => boxMove(i, 1)}>+1 box</button>
-                          </div>
-                        )}
                       </td>
                     </tr>
                   ))}
@@ -193,7 +178,7 @@ export default function Dashboard() {
               {reorders.map((r) => (
                 <div key={r.item.id} style={{ border: '1px solid var(--line-2)', borderRadius: 8, padding: 12 }}>
                   <div style={{ fontWeight: 600 }}>{r.item.name}</div>
-                  <div className="small mono" style={{ color: 'var(--ink-2)' }}>Have {r.wh} · min {r.mm.min} · order {r.need}{r.item.mode === 'box' ? ' bx' : ''}</div>
+                  <div className="small mono" style={{ color: 'var(--ink-2)' }}>Have {r.wh} · min {r.mm.min} · order {r.order.boxes != null ? `${r.order.boxes} ${r.order.boxes === 1 ? 'box' : 'boxes'} (${r.order.pieces} pcs)` : `${r.order.pieces} pcs`}</div>
                   {r.hasBreak && <Link className="small" style={{ fontWeight: 600 }} to={`/bulk?item=${r.item.id}`}>Price break available · run bulk-buy check</Link>}
                 </div>
               ))}
@@ -201,8 +186,8 @@ export default function Dashboard() {
           </section>
           <section className="note">
             <h2 style={{ fontSize: 15 }}>How status works</h2>
-            <div><b>Each items:</b> reorder when warehouse stock ≤ min. Min covers the order cycle + lead time, never less than {settings.min_days_supply} days of supply.</div>
-            <div><b>Box items:</b> two-box rule. Reorder when boxes ≤ min (usually 1). A box counts as used when it's opened or loaded on a truck.</div>
+            <div><b>All items:</b> reorder when warehouse stock ≤ min. Min covers the order cycle + lead time, never less than {settings.min_days_supply} days of supply.</div>
+            <div><b>Bought by the box:</b> stock and min/max are in pieces; orders round up to whole boxes, and max is always at least min + one box.</div>
             <div><b>Import items:</b> upload the master .xlsx (Items tab), or a CSV with columns: name, sku, category, mode (each/box), tier, unit_cost, units_per_box, monthly_usage, usage_sd, lead_days, truck_par, critical, serial_tracked, strategy (truck/warehouse/job), supplier, backup_price.</div>
           </section>
         </aside>
@@ -221,7 +206,7 @@ export default function Dashboard() {
             <div key={i.id} className="pick-row">
               <div className="grow">
                 <div style={{ fontWeight: 600 }}>{i.name}</div>
-                <div className="small muted">Warehouse has {qty(i.id, warehouse?.id)}{i.mode === 'box' ? ' boxes' : ''}</div>
+                <div className="small muted">Warehouse has {piecesLabel(i, qty(i.id, warehouse?.id))} pcs{i.mode === 'box' ? ` · enter boxes of ${i.units_per_box ?? '?'}` : ''}</div>
               </div>
               <Stepper value={recv[i.id] ?? 0} suffix={i.mode === 'box' ? ' bx' : ''} onChange={(v) => setRecv({ ...recv, [i.id]: v })} />
             </div>

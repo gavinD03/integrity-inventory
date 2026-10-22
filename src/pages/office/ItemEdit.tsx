@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useData } from '../../lib/data';
-import { holdingRate, minMax, serviceLevel, spareCheck } from '../../lib/calc';
+import { holdingRate, minMax, piecesLabel, serviceLevel, spareCheck } from '../../lib/calc';
 import { must, supabase } from '../../lib/supabase';
 import { money } from '../../lib/format';
 import type { Item } from '../../lib/types';
@@ -98,7 +98,7 @@ export default function ItemEdit() {
   }
 
   const isBox = f.mode === 'box';
-  const pieceCost = isBox ? (f.units_per_box ? f.unit_cost / f.units_per_box : null) : f.unit_cost;
+  const pieceCost: number | null = f.unit_cost;
   const suggested = f.critical || (pieceCost != null && pieceCost < settings.truck_cost_limit) ? 'truck' : 'warehouse';
 
   return (
@@ -107,7 +107,7 @@ export default function ItemEdit() {
         <div>
           <Link to="/" className="small">← Inventory</Link>
           <h1 style={{ marginTop: 4 }}>{f.id ? f.name || 'Edit item' : 'Add item'}</h1>
-          {f.id && <p className="muted" style={{ margin: '4px 0 0' }}>Warehouse on hand: <span className="mono">{qty(f.id, warehouse?.id)}{isBox ? ' boxes' : ''}</span> · change quantities through receiving, tickets or an audit</p>}
+          {f.id && <p className="muted" style={{ margin: '4px 0 0' }}>Warehouse on hand: <span className="mono">{piecesLabel(f, qty(f.id, warehouse?.id))} pcs</span> · change quantities through receiving, tickets or an audit</p>}
         </div>
       </div>
 
@@ -120,9 +120,9 @@ export default function ItemEdit() {
               <Field label="SKU / part #" id="i-sku"><input id="i-sku" value={f.sku ?? ''} onChange={(e) => set('sku', e.target.value || null)} /></Field>
               <Field label="Category" id="i-cat"><input id="i-cat" value={f.category ?? ''} onChange={(e) => set('category', e.target.value || null)} placeholder="Systems, Media, Fittings…" /></Field>
             </div>
-            <Seg label="Track by" value={f.mode} onChange={(v) => set('mode', v)} options={[
-              { value: 'each', label: 'Each', desc: 'Systems, filters, media' },
-              { value: 'box', label: 'Box', desc: 'Fittings: count boxes, not pieces' },
+            <Seg label="How we buy it" value={f.mode} onChange={(v) => set('mode', v)} options={[
+              { value: 'each', label: 'Individually', desc: 'Systems, filters, media' },
+              { value: 'box', label: 'By the box', desc: 'Fittings: stock in pieces, order whole boxes' },
             ]} />
             <Seg label="Stock strategy" value={f.strategy} onChange={(v) => set('strategy', v)} options={[
               { value: 'truck', label: 'Truck stock', desc: 'Warehouse + truck par' },
@@ -150,9 +150,9 @@ export default function ItemEdit() {
           <section className="card" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <h2>Usage + cost</h2>
             <div className="grid2">
-              <Field label={isBox ? 'Cost per box ($)' : 'Unit cost ($)'} id="i-cost"><NumInput id="i-cost" value={f.unit_cost} onChange={(v) => set('unit_cost', v ?? 0)} /></Field>
-              {isBox && <Field label="Units per box" id="i-upb"><NumInput id="i-upb" step="1" value={f.units_per_box} onChange={(v) => set('units_per_box', v)} /></Field>}
-              <Field label="Avg usage per month (units)" id="i-use" hint={`Source: ${f.usage_source}`}><NumInput id="i-use" value={f.monthly_usage} onChange={(v) => set('monthly_usage', v ?? 0)} /></Field>
+              <Field label="Cost per piece ($)" id="i-cost" hint="Current supplier's single-piece price"><NumInput id="i-cost" value={f.unit_cost} onChange={(v) => set('unit_cost', v ?? 0)} /></Field>
+              {isBox && <Field label="Box qty (pieces per box)" id="i-upb" hint="Orders round up to whole boxes"><NumInput id="i-upb" step="1" value={f.units_per_box} onChange={(v) => set('units_per_box', v)} /></Field>}
+              <Field label="Avg usage per month (pieces)" id="i-use" hint={`Source: ${f.usage_source}`}><NumInput id="i-use" value={f.monthly_usage} onChange={(v) => set('monthly_usage', v ?? 0)} /></Field>
               <Field label="Monthly swing (std. dev.)" id="i-sd" hint="How much usage varies month to month"><NumInput id="i-sd" value={f.usage_sd} onChange={(v) => set('usage_sd', v ?? 0)} /></Field>
               {f.strategy === 'truck'
                 ? <Field label="Truck par" id="i-par" hint="Target stock per truck"><NumInput id="i-par" value={f.truck_par} onChange={(v) => set('truck_par', v ?? 0)} /></Field>
@@ -217,13 +217,10 @@ export default function ItemEdit() {
                     <div className="mono" style={{ fontSize: 32 }}>{mm.max}</div>
                   </div>
                 </div>
-                <div className="small muted">{mm.unit === 'boxes' ? 'In boxes' : 'In units'}{mm.overridden ? ` · overridden (calculated ${auto.min} / ${auto.max})` : ''}</div>
+                <div className="small muted">{'In pieces'}{mm.isBox && f.units_per_box ? ` · ordered in boxes of ${f.units_per_box}` : ''}{mm.overridden ? ` · overridden (calculated ${auto.min} / ${auto.max})` : ''}</div>
                 <div className="kv">
                   {auto.steps.map((s) => <div key={s.label}><span style={{ color: 'var(--on-dark-2)', fontFamily: 'inherit', textAlign: 'left' }}>{s.label}</span><span>{s.value}</span></div>)}
                 </div>
-                {mm.isBox && (auto.boxWarn
-                  ? <div className="err">One box doesn't cover the order cycle + lead time. Min raised above 1 box.</div>
-                  : <div style={{ background: 'var(--dark-2)', borderRadius: 8, padding: 10, fontSize: 14 }}>One box covers the window. Two-box rule works.</div>)}
                 <label className="check" style={{ color: 'var(--on-dark)' }}>
                   <input type="checkbox" checked={overriding} onChange={(e) => {
                     setOverriding(e.target.checked);
@@ -243,7 +240,7 @@ export default function ItemEdit() {
             )}
           </section>
 
-          {!mm.perJob && !isBox && (
+          {!mm.perJob && (
             <section className="card">
               <h2>Is a spare worth holding?</h2>
               <div className="kv" style={{ marginTop: 10 }}>
