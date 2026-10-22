@@ -31,11 +31,9 @@ Warehouse and truck inventory for Integrity Water Treatment: tech truck view, st
 
 ## Supplier quotes (managers and owners only)
 
-Twice a year: January = full list, July = top items by spend.
-
-1. **Quotes → New round** (e.g. "2027-01 Full").
+1. **Quotes → New quote:** a title, a date and an optional note.
 2. **Generate request:** pick a supplier, select items (search, category, "Top N by spend", or copy a previous request), then generate. You get a PDF (to read/print) and an Excel reply sheet. The request records exactly which items each supplier was asked for.
-3. **Upload reply:** drop the returned `.xlsx`/`.csv`. The header row is found automatically and columns can be in any order. Rows match by SKU; unmatched rows can be mapped by hand or ignored. Warnings (missing pack size, bulk ≥ list, pack size differs from ours, >50% below best) never block saving. Re-uploading replaces that supplier's prices for the round.
+3. **Upload reply:** drop the returned `.xlsx`/`.csv`. The header row is found automatically and columns can be in any order. Rows match by SKU; unmatched rows can be mapped by hand or ignored. Warnings (missing pack size, bulk ≥ list, pack size differs from ours, >50% below best) never block saving. Re-uploading replaces that supplier's prices for that quote.
 4. **Enter by hand** for suppliers who write on the PDF.
 5. **Compare:** best list and bulk $/pc per item, current supplier price, gap %, and overpaying $/yr = (current − best list) × annual pieces, sorted by overpaying. Rows at or above the gap flag (Settings, default 10%) are highlighted. Expand a row to **Set as current supplier**, **Save bulk price**, or **Run bulk check**.
 

@@ -89,7 +89,7 @@ export async function buildQuoteWorkbook(meta: RequestMeta, items: RequestItem[]
   ws.getCell('B3').value = meta.supplier;
   ws.getCell('D3').value = 'Date:';
   ws.getCell('E3').value = meta.date;
-  ws.getCell('G3').value = 'Round:';
+  ws.getCell('G3').value = 'Quote:';
   ws.getCell('H3').value = meta.round;
   for (const a of ['A3', 'D3', 'G3']) ws.getCell(a).font = { bold: true };
 
@@ -133,7 +133,7 @@ export async function buildQuotePdf(meta: RequestMeta, items: RequestItem[]): Pr
   doc.setFontSize(10);
   doc.text(`Supplier: ${meta.supplier}`, 40, 64);
   doc.text(`Date: ${meta.date}`, 300, 64);
-  doc.text(`Round: ${meta.round}`, 480, 64);
+  doc.text(`Quote: ${meta.round}`, 480, 64);
   const instr = doc.splitTextToSize(
     'For each item please write the box qty (pieces per box), the retail price for ONE piece, and (if offered) the bulk price per piece and the bulk quantity in pieces. ' +
     'Leave a row blank if you don’t carry the item. An Excel version of this sheet is attached — replying in Excel is fastest.',

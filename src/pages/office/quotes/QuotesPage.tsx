@@ -8,6 +8,8 @@ import RequestView from './RequestView';
 import UploadView from './UploadView';
 import ManualView from './ManualView';
 
+const fmtDate = (d: string) => new Date(`${d}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+
 type View = 'compare' | 'request' | 'upload' | 'manual';
 
 export default function QuotesPage() {
@@ -40,17 +42,17 @@ export default function QuotesPage() {
       <div className="page-head">
         <div>
           <h1>Supplier quotes</h1>
-          <p className="muted" style={{ margin: '6px 0 0' }}>January: full list. July: top items by spend. All prices compared per piece.</p>
+          <p className="muted" style={{ margin: '6px 0 0' }}>Ask suppliers for prices, then compare them per piece.</p>
         </div>
         <div className="row">
           <label className="field" style={{ minWidth: 220 }}>
-            <span className="lbl">Round</span>
+            <span className="lbl">Quote</span>
             <select className="inp" value={roundId ?? ''} onChange={(e) => go({ round: e.target.value })} disabled={!rounds.length}>
-              {!rounds.length && <option value="">No rounds yet</option>}
-              {rounds.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+              {!rounds.length && <option value="">No quotes yet</option>}
+              {rounds.map((r) => <option key={r.id} value={r.id}>{r.label} · {fmtDate(r.opened_at)}</option>)}
             </select>
           </label>
-          <button className="btn" style={{ alignSelf: 'flex-end' }} onClick={() => setNewRound(true)}>New round</button>
+          <button className="btn" style={{ alignSelf: 'flex-end' }} onClick={() => setNewRound(true)}>New quote</button>
         </div>
       </div>
 
@@ -62,12 +64,13 @@ export default function QuotesPage() {
 
       {loaded && !rounds.length ? (
         <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'flex-start' }}>
-          <h2>Start your first quote round</h2>
-          <p className="muted" style={{ margin: 0 }}>A round groups every supplier's quote for one period, e.g. "2027-01 Full".</p>
-          <button className="btn primary" onClick={() => setNewRound(true)}>New round</button>
+          <h2>Start your first quote</h2>
+          <p className="muted" style={{ margin: 0 }}>Give it a title, a date and an optional note. Every supplier's prices for it are kept together.</p>
+          <button className="btn primary" onClick={() => setNewRound(true)}>New quote</button>
         </div>
       ) : round && (
         <>
+          {round.notes && <div className="note" style={{ whiteSpace: 'pre-wrap' }}>{round.notes}</div>}
           <ErrorMsg error={data.error} />
           {view === 'compare' && <CompareView round={round} {...data} />}
           {view === 'request' && <RequestView round={round} quotes={data.quotes} reload={data.reload} />}
@@ -82,33 +85,28 @@ export default function QuotesPage() {
 }
 
 function NewRound({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
-  const now = new Date();
-  const july = now.getMonth() >= 3 && now.getMonth() <= 8;
-  const nextYear = now.getMonth() >= 9 ? now.getFullYear() + 1 : now.getFullYear();
-  const [kind, setKind] = useState<'full' | 'top'>(july ? 'top' : 'full');
-  const [label, setLabel] = useState(july ? `${now.getFullYear()}-07 Top items` : `${nextYear}-01 Full`);
+  const [label, setLabel] = useState('');
+  const [date, setDate] = useState(() => new Date().toLocaleDateString('en-CA'));
+  const [notes, setNotes] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   async function create() {
     setBusy(true); setError(null);
     try {
-      const r = must(await supabase.from('quote_rounds').insert({ label: label.trim(), kind }).select('id').single()) as { id: string };
+      const r = must(await supabase.from('quote_rounds').insert({ label: label.trim(), opened_at: date, notes: notes.trim() || null }).select('id').single()) as { id: string };
       onCreated(r.id);
     } catch (e) {
-      const m = (e as Error).message;
-      setError(/duplicate|unique/i.test(m) ? 'A round with that label already exists.' : m);
+      setError((e as Error).message);
     } finally {
       setBusy(false);
     }
   }
   return (
-    <Sheet title="New quote round" onClose={onClose} foot={<><ErrorMsg error={error} /><button className="btn primary block" disabled={busy || !label.trim()} onClick={create}>{busy ? 'Creating…' : 'Create round'}</button></>}>
+    <Sheet title="New quote" onClose={onClose} foot={<><ErrorMsg error={error} /><button className="btn primary block" disabled={busy || !label.trim() || !date} onClick={create}>{busy ? 'Creating…' : 'Create quote'}</button></>}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '8px 0' }}>
-        <div className="chips">
-          <button className="chip" aria-pressed={kind === 'full'} onClick={() => setKind('full')}>Full list (January)</button>
-          <button className="chip" aria-pressed={kind === 'top'} onClick={() => setKind('top')}>Top items (July)</button>
-        </div>
-        <div className="field"><label htmlFor="r-label">Label</label><input id="r-label" value={label} onChange={(e) => setLabel(e.target.value)} /></div>
+        <div className="field"><label htmlFor="r-label">Title</label><input id="r-label" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. Fittings pricing check" autoFocus /></div>
+        <div className="field"><label htmlFor="r-date">Date</label><input id="r-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></div>
+        <div className="field"><label htmlFor="r-notes">Note</label><textarea id="r-notes" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional" /></div>
       </div>
     </Sheet>
   );

@@ -149,7 +149,8 @@ export interface Supplier {
 export interface QuoteRound {
   id: string;
   label: string;
-  kind: 'full' | 'top';
+  kind: 'full' | 'top' | null;
+  notes: string | null;
   opened_at: string;
   closed_at: string | null;
 }
