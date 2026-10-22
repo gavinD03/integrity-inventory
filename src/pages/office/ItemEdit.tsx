@@ -7,7 +7,7 @@ import { money } from '../../lib/format';
 import type { Item } from '../../lib/types';
 import { ErrorMsg, Field, NumInput, Seg } from '../../components/ui';
 import SkuBuilder from '../../components/SkuBuilder';
-import ItemBarcodes from '../../components/ItemBarcodes';
+import ItemBarcodes, { type QueuedBarcode } from '../../components/ItemBarcodes';
 import { freeSku, validSku } from '../../lib/sku';
 
 const blank: Item = {
@@ -25,6 +25,7 @@ export default function ItemEdit() {
   const nav = useNavigate();
   const [params] = useSearchParams();
   const pendingBarcode = !id ? params.get('barcode') : null;
+  const [queued, setQueued] = useState<QueuedBarcode[]>([]);
   const { items, breaks, settings, qty, warehouse, refresh, suppliers } = useData();
   const existing = id ? items.find((i) => i.id === id) : undefined;
   const [f, setF] = useState<Item>(existing ?? blank);
@@ -80,6 +81,7 @@ export default function ItemEdit() {
         const created = must(await supabase.from('items').insert(payload).select('id').single()) as { id: string };
         itemId = created.id;
         if (pendingBarcode) must(await supabase.rpc('link_barcode', { p_item: itemId, p_code: pendingBarcode, p_pieces: null, p_label: null }));
+        for (const q of queued) must(await supabase.rpc('link_barcode', { p_item: itemId, p_code: q.code, p_pieces: q.pieces, p_label: q.label }));
       }
       // Sync price breaks by quantity so only real changes are written (each change is logged).
       const valid = rows.filter((r) => r.min_qty && r.min_qty > 0 && r.unit_price != null && r.unit_price >= 0);
@@ -98,7 +100,8 @@ export default function ItemEdit() {
         else if (ex.unit_price !== r.unit_price) must(await supabase.from('price_breaks').update({ unit_price: r.unit_price }).eq('id', ex.id).select('id'));
       }
       await refresh();
-      nav('/');
+      setQueued([]);
+      nav(`/items/${itemId}?saved=1`, { replace: !f.id });
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -133,6 +136,7 @@ export default function ItemEdit() {
         <div className="main">
           <section className="card" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <h2>Item</h2>
+            {params.get('saved') && <div className="ok-msg">Saved.{f.sku ? ' You can print its label below.' : ''}</div>}
             {pendingBarcode && <div className="ok-msg">Barcode <span className="mono">{pendingBarcode}</span> will be linked to this item when you save.</div>}
             <SkuBuilder sku={f.sku} locked={!!existing?.sku_locked && !!existing?.sku} onChange={(v) => set('sku', v)} />
             <div className="grid2">
@@ -208,7 +212,7 @@ export default function ItemEdit() {
             </div>
           </section>
 
-          {existing && <ItemBarcodes item={existing} />}
+          <ItemBarcodes item={f} saved={existing} formSku={f.sku} onSkuChange={(v) => set('sku', v)} queued={queued} onQueue={setQueued} />
 
           <ErrorMsg error={error} />
           <div className="row">
