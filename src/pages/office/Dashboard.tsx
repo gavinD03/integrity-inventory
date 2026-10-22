@@ -6,6 +6,7 @@ import { must, supabase } from '../../lib/supabase';
 import { parseCsvLine } from '../../lib/format';
 import type { Item } from '../../lib/types';
 import { ErrorMsg, Sheet, Stepper } from '../../components/ui';
+import ItemImport from '../../components/ItemImport';
 
 type Filter = 'all' | 'reorder' | 'each' | 'box' | 'job';
 
@@ -20,6 +21,7 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [xlsxFile, setXlsxFile] = useState<File | null>(null);
 
   const rows = useMemo(() => items.map((i) => {
     const mm = minMax(i, settings);
@@ -33,7 +35,7 @@ export default function Dashboard() {
   const visible = rows.filter((r) => {
     if (search && !`${r.item.name} ${r.item.sku ?? ''} ${r.item.category ?? ''}`.toLowerCase().includes(search.toLowerCase())) return false;
     if (filter === 'reorder') return r.reorder;
-    if (filter === 'each') return r.item.mode === 'each' && r.item.strategy === 'stock';
+    if (filter === 'each') return r.item.mode === 'each' && r.item.strategy !== 'job';
     if (filter === 'box') return r.item.mode === 'box';
     if (filter === 'job') return r.item.strategy === 'job';
     return true;
@@ -89,7 +91,7 @@ export default function Dashboard() {
         });
         if (rec.mode && !['each', 'box'].includes(String(rec.mode).toLowerCase())) delete rec.mode;
         if (rec.mode) rec.mode = String(rec.mode).toLowerCase();
-        if (rec.strategy) rec.strategy = /job/i.test(String(rec.strategy)) ? 'job' : 'stock';
+        if (rec.strategy) rec.strategy = /job|buy/i.test(String(rec.strategy)) ? 'job' : /ware/i.test(String(rec.strategy)) ? 'warehouse' : 'truck';
         if (rec.tier != null && ![1, 2, 3, 4].includes(rec.tier as number)) delete rec.tier;
         return rec;
       }).filter((r) => r.name);
@@ -101,7 +103,7 @@ export default function Dashboard() {
     }
   }
 
-  const stockable = items.filter((i) => i.strategy === 'stock');
+  const stockable = items.filter((i) => i.strategy !== 'job');
 
   return (
     <main className="page">
@@ -111,8 +113,8 @@ export default function Dashboard() {
           <p className="muted" style={{ margin: '6px 0 0' }}>Warehouse stock with live min/max. Click an item to edit it.</p>
         </div>
         <div className="row">
-          <input ref={fileRef} type="file" accept=".csv,text/csv" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) importCsv(f); e.target.value = ''; }} />
-          <button className="btn" onClick={() => fileRef.current?.click()}>Import CSV</button>
+          <input ref={fileRef} type="file" accept=".csv,text/csv,.xlsx" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) { if (/\.xlsx$/i.test(f.name)) setXlsxFile(f); else importCsv(f); } e.target.value = ''; }} />
+          <button className="btn" onClick={() => fileRef.current?.click()}>Import items</button>
           <button className="btn" onClick={() => { setRecv({}); setError(null); setReceiving(true); }}>Receive delivery</button>
           <Link className="btn primary" to="/items/new">+ Add item</Link>
         </div>
@@ -201,10 +203,12 @@ export default function Dashboard() {
             <h2 style={{ fontSize: 15 }}>How status works</h2>
             <div><b>Each items:</b> reorder when warehouse stock ≤ min. Min covers the order cycle + lead time, never less than {settings.min_days_supply} days of supply.</div>
             <div><b>Box items:</b> two-box rule. Reorder when boxes ≤ min (usually 1). A box counts as used when it's opened or loaded on a truck.</div>
-            <div><b>CSV columns:</b> name, sku, category, mode (each/box), tier, unit_cost, units_per_box, monthly_usage, usage_sd, lead_days, truck_par, critical, serial_tracked, strategy (stock/job), supplier, backup_price.</div>
+            <div><b>Import items:</b> upload the master .xlsx (Items tab), or a CSV with columns: name, sku, category, mode (each/box), tier, unit_cost, units_per_box, monthly_usage, usage_sd, lead_days, truck_par, critical, serial_tracked, strategy (truck/warehouse/job), supplier, backup_price.</div>
           </section>
         </aside>
       </div>
+
+      {xlsxFile && <ItemImport file={xlsxFile} onClose={() => setXlsxFile(null)} />}
 
       {receiving && (
         <Sheet

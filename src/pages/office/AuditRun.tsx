@@ -44,7 +44,7 @@ export default function AuditRun() {
 
   const list: Item[] = useMemo(() => {
     if (!audit || !location) return [];
-    const base = items.filter((i) => i.strategy === 'stock' && (location.kind === 'warehouse' || i.mode === 'each'));
+    const base = items.filter((i) => i.strategy !== 'job' && (location.kind === 'warehouse' || i.mode === 'each'));
     if (scope === 'all') return base;
     // Weekly cycle count: Tier 3-4 and critical every week; Tier 1-2 rotate in thirds.
     return base.filter((i, idx) => i.tier >= 3 || i.critical || idx % 3 === audit.number % 3);

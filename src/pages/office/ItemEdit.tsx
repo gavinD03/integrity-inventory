@@ -9,7 +9,7 @@ import { ErrorMsg, Field, NumInput, Seg } from '../../components/ui';
 
 const blank: Item = {
   id: '', name: '', sku: null, category: null, mode: 'each', tier: 3, critical: false, serial_tracked: false,
-  strategy: 'stock', unit_cost: 0, units_per_box: null, monthly_usage: 0, usage_sd: 0, lead_days: 3,
+  strategy: 'truck', owner: 'manager', supplier_id: null, unit_cost: 0, units_per_box: null, monthly_usage: 0, usage_sd: 0, lead_days: 3,
   supplier: null, backup_supplier: null, backup_price: null, trip_cost: 0, shelf_life_months: null,
   storage_max: null, truck_par: 0, min_override: null, max_override: null, override_note: null,
   usage_source: 'supplier history', active: true,
@@ -20,7 +20,7 @@ interface BreakRow { id?: string; min_qty: number | null; unit_price: number | n
 export default function ItemEdit() {
   const { id } = useParams();
   const nav = useNavigate();
-  const { items, breaks, settings, qty, warehouse, refresh } = useData();
+  const { items, breaks, settings, qty, warehouse, refresh, suppliers } = useData();
   const existing = id ? items.find((i) => i.id === id) : undefined;
   const [f, setF] = useState<Item>(existing ?? blank);
   const [rows, setRows] = useState<BreakRow[]>([]);
@@ -54,6 +54,8 @@ export default function ItemEdit() {
       void _omit;
       if (!overriding) { payload.min_override = null; payload.max_override = null; payload.override_note = null; }
       if (payload.mode === 'each') payload.units_per_box = null;
+      if (payload.strategy !== 'truck') payload.truck_par = 0;
+      payload.supplier = payload.supplier_id ? suppliers.find((x) => x.id === payload.supplier_id)?.name ?? payload.supplier : payload.supplier;
       let itemId = f.id;
       if (itemId) {
         must(await supabase.from('items').update({ ...payload, updated_at: new Date().toISOString() }).eq('id', itemId).select('id'));
@@ -61,10 +63,22 @@ export default function ItemEdit() {
         const created = must(await supabase.from('items').insert(payload).select('id').single()) as { id: string };
         itemId = created.id;
       }
-      // replace price breaks
-      must(await supabase.from('price_breaks').delete().eq('item_id', itemId).select('id'));
+      // Sync price breaks by quantity so only real changes are written (each change is logged).
       const valid = rows.filter((r) => r.min_qty && r.min_qty > 0 && r.unit_price != null && r.unit_price >= 0);
-      if (valid.length) must(await supabase.from('price_breaks').insert(valid.map((r) => ({ item_id: itemId, min_qty: r.min_qty, unit_price: r.unit_price }))).select('id'));
+      const seen = new Set<number>();
+      for (const r of valid) {
+        if (seen.has(r.min_qty!)) throw new Error(`Two price breaks share the quantity ${r.min_qty}`);
+        seen.add(r.min_qty!);
+      }
+      const current = breaks.filter((b) => b.item_id === itemId);
+      for (const b of current) {
+        if (!seen.has(b.min_qty)) must(await supabase.from('price_breaks').delete().eq('id', b.id).select('id'));
+      }
+      for (const r of valid) {
+        const ex = current.find((b) => b.min_qty === r.min_qty);
+        if (!ex) must(await supabase.from('price_breaks').insert({ item_id: itemId, min_qty: r.min_qty, unit_price: r.unit_price }).select('id'));
+        else if (ex.unit_price !== r.unit_price) must(await supabase.from('price_breaks').update({ unit_price: r.unit_price }).eq('id', ex.id).select('id'));
+      }
       await refresh();
       nav('/');
     } catch (e) {
@@ -84,6 +98,8 @@ export default function ItemEdit() {
   }
 
   const isBox = f.mode === 'box';
+  const pieceCost = isBox ? (f.units_per_box ? f.unit_cost / f.units_per_box : null) : f.unit_cost;
+  const suggested = f.critical || (pieceCost != null && pieceCost < settings.truck_cost_limit) ? 'truck' : 'warehouse';
 
   return (
     <main className="page">
@@ -109,9 +125,15 @@ export default function ItemEdit() {
               { value: 'box', label: 'Box', desc: 'Fittings: count boxes, not pieces' },
             ]} />
             <Seg label="Stock strategy" value={f.strategy} onChange={(v) => set('strategy', v)} options={[
-              { value: 'stock', label: 'Stock it', desc: 'Keep on hand with min/max' },
+              { value: 'truck', label: 'Truck stock', desc: 'Warehouse + truck par' },
+              { value: 'warehouse', label: 'Warehouse only', desc: 'Issued to a job; never truck-stocked' },
               { value: 'job', label: 'Buy per job', desc: 'Not stocked; bought when needed' },
             ]} />
+            {f.strategy !== 'job' && f.strategy !== suggested && (
+              <div className="small muted" style={{ marginTop: -8 }}>
+                Suggested: {suggested === 'truck' ? 'Truck stock' : 'Warehouse only'} ({f.critical ? 'critical item' : pieceCost == null ? 'set pieces per box' : `$${pieceCost.toFixed(2)}/pc vs $${settings.truck_cost_limit} truck limit`}).
+              </div>
+            )}
             <Seg label="Tier" value={f.tier} onChange={(v) => set('tier', v)} options={[
               { value: 1, label: 'Tier 1', desc: 'Low cost · high velocity' },
               { value: 2, label: 'Tier 2', desc: 'Low cost · low velocity' },
@@ -121,6 +143,7 @@ export default function ItemEdit() {
             <div className="row" style={{ gap: 20 }}>
               <label className="check"><input type="checkbox" checked={f.critical} onChange={(e) => set('critical', e.target.checked)} /> Critical (a stockout stops a job)</label>
               <label className="check"><input type="checkbox" checked={f.serial_tracked} onChange={(e) => set('serial_tracked', e.target.checked)} /> Track serial numbers</label>
+              <label className="check"><input type="checkbox" checked={f.owner === 'owner'} onChange={(e) => set('owner', e.target.checked ? 'owner' : 'manager')} /> Owner-managed (softener systems)</label>
             </div>
           </section>
 
@@ -131,14 +154,21 @@ export default function ItemEdit() {
               {isBox && <Field label="Units per box" id="i-upb"><NumInput id="i-upb" step="1" value={f.units_per_box} onChange={(v) => set('units_per_box', v)} /></Field>}
               <Field label="Avg usage per month (units)" id="i-use" hint={`Source: ${f.usage_source}`}><NumInput id="i-use" value={f.monthly_usage} onChange={(v) => set('monthly_usage', v ?? 0)} /></Field>
               <Field label="Monthly swing (std. dev.)" id="i-sd" hint="How much usage varies month to month"><NumInput id="i-sd" value={f.usage_sd} onChange={(v) => set('usage_sd', v ?? 0)} /></Field>
-              <Field label="Truck par" id="i-par" hint="Target stock per truck"><NumInput id="i-par" value={f.truck_par} onChange={(v) => set('truck_par', v ?? 0)} /></Field>
+              {f.strategy === 'truck'
+                ? <Field label="Truck par" id="i-par" hint="Target stock per truck"><NumInput id="i-par" value={f.truck_par} onChange={(v) => set('truck_par', v ?? 0)} /></Field>
+                : <Field label="Truck par" id="i-par" hint="Only truck-stock items have a par"><input id="i-par" value="—" disabled /></Field>}
             </div>
           </section>
 
           <section className="card" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <h2>Suppliers</h2>
             <div className="grid2">
-              <Field label="Main supplier" id="i-sup"><input id="i-sup" value={f.supplier ?? ''} onChange={(e) => set('supplier', e.target.value || null)} /></Field>
+              <Field label="Current supplier" id="i-sup" hint="Suppliers are managed in Settings">
+                <select id="i-sup" value={f.supplier_id ?? ''} onChange={(e) => set('supplier_id', e.target.value || null)}>
+                  <option value="">{f.supplier && !f.supplier_id ? `${f.supplier} (not in list)` : 'None'}</option>
+                  {suppliers.filter((x) => x.active || x.id === f.supplier_id).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                </select>
+              </Field>
               <Field label="Lead time (days)" id="i-lead" hint="Use the worst normal case"><NumInput id="i-lead" step="1" value={f.lead_days} onChange={(v) => set('lead_days', v ?? 0)} /></Field>
               <Field label="Local backup supplier" id="i-bsup"><input id="i-bsup" value={f.backup_supplier ?? ''} onChange={(e) => set('backup_supplier', e.target.value || null)} /></Field>
               <Field label="Backup price ($)" id="i-bp"><NumInput id="i-bp" value={f.backup_price} onChange={(v) => set('backup_price', v)} /></Field>

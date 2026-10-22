@@ -5,12 +5,12 @@ import type { Item, Settings } from './types';
 const settings: Settings = {
   capital_rate: 22, shrink_rate: 2, tier4_addon: 3, order_cycle_days: 7,
   min_days_supply: 30, max_days_supply: 45,
-  sl_t1: 98, sl_t2: 95, sl_t3: 98, sl_t4: 90, sl_critical: 99, cash_cap: 8000,
+  sl_t1: 98, sl_t2: 95, sl_t3: 98, sl_t4: 90, sl_critical: 99, cash_cap: 8000, truck_cost_limit: 250, quote_gap_flag_pct: 10,
 };
 
 const base: Item = {
   id: 'x', name: 'Test', sku: null, category: null, mode: 'each', tier: 3, critical: false,
-  serial_tracked: false, strategy: 'stock', unit_cost: 133, units_per_box: null, monthly_usage: 10,
+  serial_tracked: false, strategy: 'truck', owner: 'manager', supplier_id: null, unit_cost: 133, units_per_box: null, monthly_usage: 10,
   usage_sd: 3, lead_days: 3, supplier: null, backup_supplier: null, backup_price: null, trip_cost: 0,
   shelf_life_months: null, storage_max: null, truck_par: 0, min_override: null, max_override: null,
   override_note: null, usage_source: 'supplier history', active: true,

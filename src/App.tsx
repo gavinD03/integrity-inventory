@@ -15,6 +15,7 @@ import Tickets from './pages/office/Tickets';
 import AuditList from './pages/office/AuditList';
 import AuditRun from './pages/office/AuditRun';
 import Settings from './pages/office/Settings';
+import QuotesPage from './pages/office/quotes/QuotesPage';
 
 export default function App() {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
@@ -64,6 +65,7 @@ export default function App() {
           <Route path="/audits" element={<AuditList />} />
           <Route path="/audits/:id" element={<AuditRun />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/quotes" element={<QuotesPage />} />
         </Route>
         <Route path="/truck" element={<TechHome />} />
         <Route path="/job" element={<CloseJob />} />

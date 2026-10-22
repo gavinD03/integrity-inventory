@@ -11,6 +11,7 @@ export default function OfficeLayout() {
     { to: '/', label: 'Inventory', end: true },
     { to: '/tickets', label: 'Tickets' },
     { to: '/audits', label: 'Audits' },
+    { to: '/quotes', label: 'Quotes' },
     { to: '/bulk', label: 'Bulk buy' },
     { to: '/settings', label: 'Settings' },
     { to: '/truck', label: 'Tech view' },

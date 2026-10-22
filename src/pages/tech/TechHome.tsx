@@ -264,7 +264,7 @@ export default function TechHome() {
             </>
           }
         >
-          {tracked.filter((i) => i.strategy === 'stock').map((i) => (
+          {tracked.filter((i) => i.strategy !== 'job').map((i) => (
             <div key={i.id} className="pick-row">
               <div className="grow"><div style={{ fontWeight: 600 }}>{i.name}</div></div>
               <input

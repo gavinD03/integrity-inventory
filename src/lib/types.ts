@@ -32,6 +32,8 @@ export interface Settings {
   sl_t4: number;
   sl_critical: number;
   cash_cap: number;
+  truck_cost_limit: number;
+  quote_gap_flag_pct: number;
 }
 
 export interface Item {
@@ -43,7 +45,9 @@ export interface Item {
   tier: 1 | 2 | 3 | 4;
   critical: boolean;
   serial_tracked: boolean;
-  strategy: 'stock' | 'job';
+  strategy: 'truck' | 'warehouse' | 'job';
+  owner: 'manager' | 'owner';
+  supplier_id: string | null;
   unit_cost: number;
   units_per_box: number | null;
   monthly_usage: number;
@@ -129,4 +133,45 @@ export interface StockRow {
   item_id: string;
   location_id: string;
   qty: number;
+}
+
+export interface Supplier {
+  id: string;
+  name: string;
+  active: boolean;
+  notes: string | null;
+}
+
+export interface QuoteRound {
+  id: string;
+  label: string;
+  kind: 'full' | 'top';
+  opened_at: string;
+  closed_at: string | null;
+}
+
+export interface SupplierQuote {
+  id: string;
+  round_id: string;
+  supplier_id: string;
+  file_name: string | null;
+  uploaded_at: string;
+  requested_at: string | null;
+  status: 'requested' | 'draft' | 'saved';
+}
+
+export interface QuoteLine {
+  id: string;
+  quote_id: string;
+  item_id: string | null;
+  requested: boolean;
+  sku_raw: string | null;
+  description_raw: string | null;
+  pieces_per_pack: number | null;
+  list_pack_price: number | null;
+  list_unit_price: number | null;
+  bulk_qty: number | null;
+  bulk_unit_price: number | null;
+  notes: string | null;
+  match_status: 'matched' | 'unmatched' | 'manual' | 'ignored';
 }

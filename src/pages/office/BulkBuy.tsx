@@ -9,8 +9,9 @@ export default function BulkBuy() {
   const { items, breaks, settings } = useData();
   const [params, setParams] = useSearchParams();
   const withBreaks = items.filter((i) => breaks.some((b) => b.item_id === i.id && b.min_qty > 1));
-  const choices = withBreaks.length ? withBreaks : items;
-  const itemId = params.get('item') ?? choices[0]?.id ?? '';
+  const baseChoices = withBreaks.length ? withBreaks : items;
+  const itemId = params.get('item') ?? baseChoices[0]?.id ?? '';
+  const choices = baseChoices.some((i) => i.id === itemId) ? baseChoices : [...baseChoices, ...items.filter((i) => i.id === itemId)];
   const item = items.find((i) => i.id === itemId);
   const itemBreaks = useMemo(() => breaks.filter((b) => b.item_id === itemId && b.min_qty > 1), [breaks, itemId]);
   const [breakIdx, setBreakIdx] = useState(0);
@@ -18,12 +19,17 @@ export default function BulkBuy() {
   const defaults = useMemo<BulkInput | null>(() => {
     if (!item) return null;
     const b = itemBreaks[Math.min(breakIdx, itemBreaks.length - 1)];
+    // Work in the item's stock unit: boxes for box items (usage is stored in pieces).
+    const upb = item.mode === 'box' ? item.units_per_box || 1 : 1;
+    const usage = (item.monthly_usage || 0) / upb || 1;
+    const q = (k: string) => { const v = params.get(k); return v != null && v !== '' && !isNaN(Number(v)) ? Number(v) : null; };
+    const fromQuote = params.get('from') != null;
     return {
-      normalPrice: item.unit_cost,
-      normalQty: Math.max(1, Math.round(item.monthly_usage) || 1),
-      bulkPrice: b ? b.unit_price : item.unit_cost,
-      bulkQty: b ? b.min_qty : Math.max(1, Math.round(item.monthly_usage * 3)),
-      usage: item.monthly_usage || 1,
+      normalPrice: (fromQuote ? q('np') : null) ?? item.unit_cost,
+      normalQty: Math.max(1, Math.round(usage) || 1),
+      bulkPrice: (fromQuote ? q('bp') : null) ?? (b ? b.unit_price : item.unit_cost),
+      bulkQty: (fromQuote ? q('bq') : null) ?? (b ? b.min_qty : Math.max(1, Math.round(usage * 3))),
+      usage,
       holdPct: holdingRate(item, settings),
       tripCost: item.trip_cost,
       freight: 0,
@@ -31,7 +37,7 @@ export default function BulkBuy() {
       storageMax: item.storage_max,
       cashCap: settings.cash_cap,
     };
-  }, [item, itemBreaks, breakIdx, settings]);
+  }, [item, itemBreaks, breakIdx, settings, params]);
 
   const [inp, setInp] = useState<BulkInput | null>(defaults);
   useEffect(() => { setInp(defaults); }, [defaults]);
@@ -49,7 +55,8 @@ export default function BulkBuy() {
       <div className="page-head">
         <div>
           <h1>Bulk-buy check</h1>
-          <p className="muted" style={{ margin: '6px 0 0' }}>Does the bulk price beat the cost of holding the extra stock?</p>
+          <p className="muted" style={{ margin: '6px 0 0' }}>Does the bulk price beat the cost of holding the extra stock?{item?.mode === 'box' ? ' Quantities and prices are per box.' : ''}</p>
+          {params.get('from') && <p className="small" style={{ margin: '4px 0 0', color: 'var(--accent-ink)' }}>Pre-filled from quote: {params.get('from')}</p>}
         </div>
         <div className="field" style={{ minWidth: 280 }}>
           <label htmlFor="bb-item">Item</label>
