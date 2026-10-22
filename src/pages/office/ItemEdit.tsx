@@ -1,18 +1,21 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useData } from '../../lib/data';
 import { holdingRate, minMax, piecesLabel, serviceLevel, spareCheck } from '../../lib/calc';
 import { must, supabase } from '../../lib/supabase';
 import { money } from '../../lib/format';
 import type { Item } from '../../lib/types';
 import { ErrorMsg, Field, NumInput, Seg } from '../../components/ui';
+import SkuBuilder from '../../components/SkuBuilder';
+import ItemBarcodes from '../../components/ItemBarcodes';
+import { freeSku, validSku } from '../../lib/sku';
 
 const blank: Item = {
   id: '', name: '', sku: null, category: null, mode: 'each', tier: 3, critical: false, serial_tracked: false,
   strategy: 'truck', owner: 'manager', supplier_id: null, unit_cost: 0, units_per_box: null, monthly_usage: 0, usage_sd: 0, lead_days: 3,
   supplier: null, backup_supplier: null, backup_price: null, trip_cost: 0, shelf_life_months: null,
   storage_max: null, truck_par: 0, min_override: null, max_override: null, override_note: null,
-  usage_source: 'supplier history', active: true,
+  usage_source: 'supplier history', active: true, sku_locked: false, label_printed_at: null,
 };
 
 interface BreakRow { id?: string; min_qty: number | null; unit_price: number | null }
@@ -20,6 +23,8 @@ interface BreakRow { id?: string; min_qty: number | null; unit_price: number | n
 export default function ItemEdit() {
   const { id } = useParams();
   const nav = useNavigate();
+  const [params] = useSearchParams();
+  const pendingBarcode = !id ? params.get('barcode') : null;
   const { items, breaks, settings, qty, warehouse, refresh, suppliers } = useData();
   const existing = id ? items.find((i) => i.id === id) : undefined;
   const [f, setF] = useState<Item>(existing ?? blank);
@@ -48,10 +53,22 @@ export default function ItemEdit() {
   async function save() {
     if (!f.name.trim()) { setError('Name is required'); return; }
     if (overriding && !f.override_note?.trim()) { setError('Add a note explaining the min/max override'); return; }
+    if (f.sku && !validSku(f.sku)) { setError('SKU can only use letters, numbers and single dashes'); return; }
     setBusy(true); setError(null);
     try {
-      const { id: _omit, ...payload } = { ...f, name: f.name.trim() };
-      void _omit;
+      const { id: _omit, sku_locked: _l, label_printed_at: _p, ...payload } = { ...f, name: f.name.trim() };
+      void _omit; void _l; void _p;
+      // Uniqueness (case-insensitive, including archived items). On collision offer SKU-2, SKU-3…
+      const changed = payload.sku && (!existing || existing.sku !== payload.sku);
+      if (changed && payload.sku) {
+        const { data } = await supabase.from('items').select('id, sku').ilike('sku', `${payload.sku}%`);
+        const taken = ((data as { id: string; sku: string }[]) ?? []).filter((r) => r.id !== f.id).map((r) => r.sku);
+        const free = freeSku(payload.sku, taken);
+        if (free !== payload.sku) {
+          if (!confirm(`${payload.sku} already exists. Is this a duplicate?\n\nOK = save this item as ${free}\nCancel = go back and check`)) { setBusy(false); return; }
+          payload.sku = free;
+        }
+      }
       if (!overriding) { payload.min_override = null; payload.max_override = null; payload.override_note = null; }
       if (payload.mode === 'each') payload.units_per_box = null;
       if (payload.strategy !== 'truck') payload.truck_par = 0;
@@ -62,6 +79,7 @@ export default function ItemEdit() {
       } else {
         const created = must(await supabase.from('items').insert(payload).select('id').single()) as { id: string };
         itemId = created.id;
+        if (pendingBarcode) must(await supabase.rpc('link_barcode', { p_item: itemId, p_code: pendingBarcode, p_pieces: null, p_label: null }));
       }
       // Sync price breaks by quantity so only real changes are written (each change is logged).
       const valid = rows.filter((r) => r.min_qty && r.min_qty > 0 && r.unit_price != null && r.unit_price >= 0);
@@ -115,9 +133,10 @@ export default function ItemEdit() {
         <div className="main">
           <section className="card" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <h2>Item</h2>
+            {pendingBarcode && <div className="ok-msg">Barcode <span className="mono">{pendingBarcode}</span> will be linked to this item when you save.</div>}
+            <SkuBuilder sku={f.sku} locked={!!existing?.sku_locked && !!existing?.sku} onChange={(v) => set('sku', v)} />
             <div className="grid2">
               <Field label="Name" id="i-name"><input id="i-name" value={f.name} onChange={(e) => set('name', e.target.value)} /></Field>
-              <Field label="SKU / part #" id="i-sku"><input id="i-sku" value={f.sku ?? ''} onChange={(e) => set('sku', e.target.value || null)} /></Field>
               <Field label="Category" id="i-cat"><input id="i-cat" value={f.category ?? ''} onChange={(e) => set('category', e.target.value || null)} placeholder="Systems, Media, Fittings…" /></Field>
             </div>
             <Seg label="How we buy it" value={f.mode} onChange={(v) => set('mode', v)} options={[
@@ -188,6 +207,8 @@ export default function ItemEdit() {
               <div><button className="btn sm" onClick={() => setRows([...rows, { min_qty: null, unit_price: null }])}>+ Add price break</button></div>
             </div>
           </section>
+
+          {existing && <ItemBarcodes item={existing} />}
 
           <ErrorMsg error={error} />
           <div className="row">

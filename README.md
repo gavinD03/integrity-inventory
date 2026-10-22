@@ -10,6 +10,7 @@ Warehouse and truck inventory for Integrity Water Treatment: tech truck view, st
   - `LD` warehouse → truck (tech taps **Load truck**)
   - `JB` truck → job (tech closes a job; serial numbers required for serial-tracked items)
   - `TR` truck → truck (pending until the receiving truck confirms; leaves the sender immediately)
+  - `RT` truck → warehouse (tech returns unused stock)
   - `RC` received from a supplier, `AD` adjustment, `RV` reversal (office only)
 - **Roles**
   - *Tech:* sees only their truck; can load, close jobs, transfer, confirm incoming transfers, and submit truck counts.
@@ -19,6 +20,14 @@ Warehouse and truck inventory for Integrity Water Treatment: tech truck view, st
 - **Stock strategy:** *truck* (warehouse + truck par; default under the truck cost limit or critical), *warehouse* (stocked, issued to a job, never truck-stocked), *job* (bought per job, no min/max).
 - **Holding rate** = capital rate + shrink (+ Tier 4 obsolescence add-on). Utilities and insurance are excluded as fixed costs. Set these in **Settings**.
 - **Audits:** start the weekly audit, count each location blind (expected quantities are hidden until saved), review differences with reasons, then complete. Differences post as adjustment tickets automatically. The audit history shows variance % and shrink $ week over week.
+
+## SKUs, labels and scanning
+
+- **SKU format** `CATEGORY-MATERIAL-ITEM-SIZE` (e.g. `FIT-PVC-E90-100`); segments that don't apply are dropped, reducers combine sizes (`125100`). The item screen builds the SKU from four dropdowns (plus an optional second size) fed by **Settings → SKU codes**; managers can add codes inline. SKUs are uppercase letters, digits and dashes, unique (a collision offers `-2`, `-3`…).
+- **Locking:** once an item has any ticket line or a printed label its SKU can't change (enforced by a database trigger). Archive and recreate to rename.
+- **Bin labels:** select items on Inventory → **Print labels** → Avery 5160 (30/page, with "skip first N" for partly used sheets) or 2" × 1" thermal. Barcode = Code 128 of the SKU. Print at 100% / actual size. In testing, SKUs over 15 characters didn't decode on a simulated 203 dpi thermal printer; use 300 dpi or Avery sheets for those.
+- **Manufacturer barcodes (UPC/EAN):** never generated. Link them on the item screen (scan or type), from any scan screen when a code is unknown (managers), with **pieces per scan** (box UPC = whole box). A code linked to another item is refused with that item named.
+- **Scanning:** phone camera (BarcodeDetector where available, ZXing elsewhere incl. iOS Safari) or a USB/Bluetooth scanner, on Load truck, Transfer, **Return to warehouse**, Close a job, Receive delivery and audit counts. Lookup: SKU first, then linked barcodes. Each scan adds pieces-per-scan; repeat scans increment.
 
 ## Supplier quotes (managers and owners only)
 

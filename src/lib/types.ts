@@ -1,5 +1,5 @@
 export type Role = 'tech' | 'manager' | 'owner';
-export type TicketType = 'load' | 'job' | 'transfer' | 'adjust' | 'receive' | 'reverse';
+export type TicketType = 'load' | 'job' | 'transfer' | 'adjust' | 'receive' | 'reverse' | 'return';
 export type TicketStatus = 'applied' | 'pending' | 'confirmed' | 'cancelled';
 
 export interface Location {
@@ -65,6 +65,8 @@ export interface Item {
   override_note: string | null;
   usage_source: string;
   active: boolean;
+  sku_locked: boolean;
+  label_printed_at: string | null;
 }
 
 export interface PriceBreak {
@@ -174,4 +176,22 @@ export interface QuoteLine {
   bulk_unit_price: number | null;
   notes: string | null;
   match_status: 'matched' | 'unmatched' | 'manual' | 'ignored';
+}
+
+export type SkuSegment = 'category' | 'material' | 'item' | 'size';
+
+export interface SkuCode {
+  id: string;
+  segment: SkuSegment;
+  code: string;
+  label: string;
+  active: boolean;
+}
+
+export interface ItemBarcode {
+  id: string;
+  item_id: string;
+  code: string;
+  pieces_per_scan: number;
+  label: string | null;
 }

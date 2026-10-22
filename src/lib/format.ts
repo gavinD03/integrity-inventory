@@ -8,7 +8,7 @@ export const num = (v: number, digits = 0) =>
   v.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
 
 const PREFIX: Record<TicketType, string> = {
-  load: 'LD', job: 'JB', transfer: 'TR', adjust: 'AD', receive: 'RC', reverse: 'RV',
+  load: 'LD', job: 'JB', transfer: 'TR', adjust: 'AD', receive: 'RC', reverse: 'RV', return: 'RT',
 };
 
 export const TYPE_LABEL: Record<TicketType, string> = {
@@ -18,6 +18,7 @@ export const TYPE_LABEL: Record<TicketType, string> = {
   adjust: 'Adjustment',
   receive: 'Received',
   reverse: 'Reversal',
+  return: 'Truck → warehouse',
 };
 
 export const ticketCode = (t: Pick<Ticket, 'type' | 'number'>) => `${PREFIX[t.type]}-${String(t.number).padStart(4, '0')}`;

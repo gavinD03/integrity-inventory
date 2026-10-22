@@ -4,6 +4,7 @@ import { useData } from '../../lib/data';
 import { must, supabase } from '../../lib/supabase';
 import { ticketCode } from '../../lib/format';
 import { ErrorMsg, Stepper } from '../../components/ui';
+import Scanner from '../../components/Scanner';
 
 interface Line { item_id: string; qty: number; serial: string }
 
@@ -18,6 +19,7 @@ export default function CloseJob() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
+  const [scan, setScan] = useState(false);
 
   const usable = items.filter((i) => i.mode === 'each');
 
@@ -116,6 +118,15 @@ export default function CloseJob() {
           );
         })}
 
+        <button type="button" className="btn primary" onClick={() => setScan(true)}>Scan parts</button>
+        {scan && <Scanner title="Scan parts used" onItem={(r) => {
+          const before = lines.find((l) => l.item_id === r.item.id)?.qty ?? 0;
+          setLines((ls) => {
+            const ex = ls.find((l) => l.item_id === r.item.id);
+            return ex ? ls.map((l) => (l.item_id === r.item.id ? { ...l, qty: l.qty + r.pieces } : l)) : [...ls, { item_id: r.item.id, qty: r.pieces, serial: '' }];
+          });
+          return `+${r.pieces} ${r.item.sku ?? r.item.name} → ${before + r.pieces}${r.item.serial_tracked ? ' · enter its serial' : ''}`;
+        }} onClose={() => setScan(false)} />}
         <div className="row" style={{ flexWrap: 'nowrap' }}>
           <select className="inp" aria-label="Add a part" value={addId} onChange={(e) => setAddId(e.target.value)} style={{ flex: 1 }}>
             <option value="">Add a part…</option>

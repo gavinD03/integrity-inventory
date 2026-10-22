@@ -1,11 +1,11 @@
 import { useEffect, type ReactNode } from 'react';
 
-export function Stepper({ value, onChange, min = 0, max = Infinity, suffix = '' }: {
-  value: number; onChange: (v: number) => void; min?: number; max?: number; suffix?: string;
+export function Stepper({ value, onChange, min = 0, max = Infinity, suffix = '', step = 1 }: {
+  value: number; onChange: (v: number) => void; min?: number; max?: number; suffix?: string; step?: number;
 }) {
   return (
     <div className="stepper">
-      <button type="button" aria-label="One fewer" onClick={() => onChange(Math.max(min, value - 1))} disabled={value <= min}>−</button>
+      <button type="button" aria-label={step > 1 ? `${step} fewer` : 'One fewer'} onClick={() => onChange(Math.max(min, value - step))} disabled={value <= min}>−</button>
       <label className="v" style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
         <input
           type="number"
@@ -21,7 +21,7 @@ export function Stepper({ value, onChange, min = 0, max = Infinity, suffix = '' 
         />
         {suffix && <span className="small muted">{suffix.trim()}</span>}
       </label>
-      <button type="button" aria-label="One more" onClick={() => onChange(Math.min(max, value + 1))} disabled={value >= max}>+</button>
+      <button type="button" aria-label={step > 1 ? `${step} more` : 'One more'} onClick={() => onChange(Math.min(max, value + step))} disabled={value >= max}>+</button>
     </div>
   );
 }

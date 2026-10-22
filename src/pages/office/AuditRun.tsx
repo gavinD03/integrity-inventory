@@ -6,6 +6,7 @@ import { money, ticketCode } from '../../lib/format';
 import type { Audit, AuditCount, Item, Ticket } from '../../lib/types';
 import { ErrorMsg } from '../../components/ui';
 import { auditSummary } from './AuditList';
+import Scanner from '../../components/Scanner';
 
 export default function AuditRun() {
   const { id } = useParams();
@@ -16,6 +17,7 @@ export default function AuditRun() {
   const [loc, setLoc] = useState<string>(locations[0]?.id ?? '');
   const [scope, setScope] = useState<'week' | 'all'>('week');
   const [entry, setEntry] = useState<Record<string, string>>({});
+  const [scan, setScan] = useState(false);
   const [reasons, setReasons] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState('');
   const [orderNote, setOrderNote] = useState('');
@@ -179,7 +181,26 @@ export default function AuditRun() {
             </table>
           </div>
           <div className="row" style={{ padding: 16 }}>
+            <button className="btn" onClick={() => setScan(true)}>Scan to count</button>
             <button className="btn primary" disabled={busy || !Object.values(entry).some((v) => v !== '')} onClick={saveLocation}>{busy ? 'Saving…' : `Save ${location?.name} counts`}</button>
+            {scan && <Scanner title={`Count ${location?.name ?? ''}`} onItem={(r) => {
+              const it = r.item;
+              if (it.strategy === 'job') return `${it.name} is buy-per-job (not counted)`;
+              if (location?.kind === 'truck' && it.mode === 'box') return `${it.name}: fittings aren't counted on trucks`;
+              const upb = it.units_per_box || 1;
+              const n = (k: string) => Number(entry[k] || 0);
+              if (it.mode === 'box' && r.pieces === upb) {
+                setEntry((e) => ({ ...e, [it.id]: String(Number(e[it.id] || 0) + 1) }));
+                return `+1 box ${it.sku ?? it.name} → ${n(it.id) + 1} boxes + ${n(`${it.id}:loose`)} loose`;
+              }
+              if (it.mode === 'box') {
+                const k = `${it.id}:loose`;
+                setEntry((e) => ({ ...e, [k]: String(Number(e[k] || 0) + r.pieces) }));
+                return `+${r.pieces} loose ${it.sku ?? it.name} → ${n(it.id)} boxes + ${n(k) + r.pieces} loose`;
+              }
+              setEntry((e) => ({ ...e, [it.id]: String(Number(e[it.id] || 0) + r.pieces) }));
+              return `+${r.pieces} ${it.sku ?? it.name} → ${n(it.id) + r.pieces}`;
+            }} onClose={() => setScan(false)} />}
           </div>
         </section>
       )}

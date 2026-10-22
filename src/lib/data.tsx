@@ -1,6 +1,11 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { must, supabase } from './supabase';
-import type { Item, Kit, Location, PriceBreak, Profile, Settings, StockRow, Supplier } from './types';
+import type { Item, ItemBarcode, Kit, Location, PriceBreak, Profile, Settings, SkuCode, StockRow, Supplier } from './types';
+
+export type ScanResult =
+  | { kind: 'item'; item: Item; pieces: number; via: 'sku' | 'barcode'; code: string; label: string | null }
+  | { kind: 'inactive'; name: string; code: string }
+  | { kind: 'unknown'; code: string };
 
 interface Data {
   me: Profile;
@@ -12,6 +17,10 @@ interface Data {
   kits: Kit[];
   stock: StockRow[];
   suppliers: Supplier[];
+  skuCodes: SkuCode[];
+  barcodes: ItemBarcode[];
+  /** Lookup order: items.sku (case-insensitive), then linked manufacturer barcodes. */
+  resolveScan: (code: string) => Promise<ScanResult>;
   supplierName: (id: string | null | undefined) => string;
   loading: boolean;
   refresh: () => Promise<void>;
@@ -32,12 +41,14 @@ export function DataProvider({ me, children }: { me: Profile; children: ReactNod
   const [kits, setKits] = useState<Kit[]>([]);
   const [stock, setStock] = useState<StockRow[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [skuCodes, setSkuCodes] = useState<SkuCode[]>([]);
+  const [barcodes, setBarcodes] = useState<ItemBarcode[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
-      const [l, i, b, s, k, st, sup] = await Promise.all([
+      const [l, i, b, s, k, st, sup, sc, bc] = await Promise.all([
         supabase.from('locations').select('*').eq('active', true).order('sort'),
         supabase.from('items').select('*').eq('active', true).order('name'),
         supabase.from('price_breaks').select('*').order('min_qty'),
@@ -45,6 +56,8 @@ export function DataProvider({ me, children }: { me: Profile; children: ReactNod
         supabase.from('kits').select('id, name, kit_items(item_id, qty)').order('name'),
         supabase.rpc('stock_by_location'),
         me.role === 'tech' ? Promise.resolve({ data: [], error: null }) : supabase.from('suppliers').select('*').order('name'),
+        supabase.from('sku_codes').select('*').order('code'),
+        supabase.from('item_barcodes').select('id, item_id, code, pieces_per_scan, label'),
       ]);
       setLocations(must(l) as Location[]);
       setItems((must(i) as Item[]).map(normItem));
@@ -52,6 +65,8 @@ export function DataProvider({ me, children }: { me: Profile; children: ReactNod
       setSettings(normSettings(must(s) as Settings));
       setKits(must(k) as Kit[]);
       setSuppliers(must(sup) as Supplier[]);
+      setSkuCodes(must(sc) as SkuCode[]);
+      setBarcodes((must(bc) as ItemBarcode[]).map((x) => ({ ...x, pieces_per_scan: Number(x.pieces_per_scan) })));
       setStock((must(st) as StockRow[]).map((r) => ({ ...r, qty: Number(r.qty) })));
       setError(null);
     } catch (e) {
@@ -73,7 +88,29 @@ export function DataProvider({ me, children }: { me: Profile; children: ReactNod
     return {
       me,
       isManager: me.role !== 'tech',
-      locations, items, breaks, settings, kits, stock, suppliers, loading, refresh,
+      locations, items, breaks, settings, kits, stock, suppliers, skuCodes, barcodes, loading, refresh,
+      resolveScan: async (raw) => {
+        const code = raw.trim();
+        if (!code) return { kind: 'unknown', code };
+        const lc = code.toLowerCase();
+        const bySku = items.find((i) => i.sku && i.sku.toLowerCase() === lc);
+        if (bySku) return { kind: 'item', item: bySku, pieces: 1, via: 'sku', code, label: null };
+        // UPC-A and EAN-13 are the same number with/without a leading 0; scanners report either.
+        const alts = /^\d{12}$/.test(code) ? [code, `0${code}`] : /^0\d{12}$/.test(code) ? [code, code.slice(1)] : [code];
+        const bc = barcodes.find((b) => alts.includes(b.code));
+        if (bc) {
+          const it = itemMap.get(bc.item_id);
+          if (it) return { kind: 'item', item: it, pieces: bc.pieces_per_scan, via: 'barcode', code, label: bc.label };
+        }
+        // Not among active items: check whether it belongs to an inactive one.
+        const { data } = await supabase.from('items').select('name, active').ilike('sku', code.replace(/[%_]/g, '')).limit(1);
+        if (data && data[0] && !data[0].active) return { kind: 'inactive', name: data[0].name, code };
+        if (bc) {
+          const r = await supabase.from('items').select('name').eq('id', bc.item_id).single();
+          if (r.data) return { kind: 'inactive', name: r.data.name, code };
+        }
+        return { kind: 'unknown', code };
+      },
       supplierName: (id) => (id ? suppliers.find((x) => x.id === id)?.name ?? '—' : '—'),
       qty: (itemId, locId) => (locId ? stockMap.get(`${itemId}:${locId}`) ?? 0 : 0),
       itemById: (id) => itemMap.get(id),
@@ -81,7 +118,7 @@ export function DataProvider({ me, children }: { me: Profile; children: ReactNod
       warehouse: locations.find((l) => l.kind === 'warehouse'),
       trucks: locations.filter((l) => l.kind === 'truck'),
     };
-  }, [me, locations, items, breaks, settings, kits, stock, suppliers, loading, refresh]);
+  }, [me, locations, items, breaks, settings, kits, stock, suppliers, skuCodes, barcodes, loading, refresh]);
 
   if (error && !value) return <div className="center-msg">Couldn't load data: {error}</div>;
   if (!value) return <div className="center-msg">Loading…</div>;

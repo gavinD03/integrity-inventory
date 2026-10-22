@@ -4,6 +4,7 @@ import { must, supabase } from '../../lib/supabase';
 import type { Profile, Role, Settings as S } from '../../lib/types';
 import { ErrorMsg, Field, NumInput } from '../../components/ui';
 import { adminUsers } from '../../lib/admin';
+import SkuCodesSettings from '../../components/SkuCodesSettings';
 
 export default function Settings() {
   const { me, settings, trucks, kits, items, itemById, refresh, suppliers } = useData();
@@ -196,6 +197,8 @@ export default function Settings() {
               }, 'Truck added.')}>Add</button>
             </div>
           </section>
+
+          <SkuCodesSettings />
 
           <section className="card" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <h2>Job kits</h2>

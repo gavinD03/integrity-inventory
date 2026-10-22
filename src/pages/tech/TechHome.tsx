@@ -6,9 +6,10 @@ import { ticketCode, when, TYPE_LABEL } from '../../lib/format';
 import type { Audit, Item, Ticket } from '../../lib/types';
 import { ErrorMsg, Sheet, Stepper } from '../../components/ui';
 import ChangePassword from '../../components/ChangePassword';
+import Scanner from '../../components/Scanner';
 import { piecesLabel } from '../../lib/calc';
 
-type SheetKind = null | 'load' | 'transfer' | 'count' | 'done';
+type SheetKind = null | 'load' | 'transfer' | 'return' | 'count' | 'done';
 
 export default function TechHome() {
   const d = useData();
@@ -28,6 +29,8 @@ export default function TechHome() {
   const [audit, setAudit] = useState<Audit | null>(null);
   const [counts, setCounts] = useState<Record<string, number | null>>({});
   const [pwOpen, setPwOpen] = useState(false);
+  const [scan, setScan] = useState(false);
+  const [search, setSearch] = useState('');
 
   const tracked = useMemo(() => items.filter((i) => i.mode === 'each'), [items]);
   const onTruck = useMemo(
@@ -50,12 +53,23 @@ export default function TechHome() {
   useEffect(() => { loadExtras(); }, [loadExtras]);
 
   const open = (k: SheetKind) => {
-    setPick({}); setError(null); setSheet(k);
+    setPick({}); setError(null); setSearch(''); setSheet(k);
     if (k === 'transfer') setDest(trucks.find((t) => t.id !== truckId)?.id ?? null);
   };
   const close = () => { setSheet(null); setPick({}); setError(null); };
 
-  const sourceItems: Item[] = sheet === 'transfer' ? onTruck.filter((i) => qty(i.id, truckId) > 0) : items;
+  const fromTruck = sheet === 'transfer' || sheet === 'return';
+  // Return can send back anything on the truck, including fittings loaded by the box.
+  const onTruckAny = items.filter((i) => qty(i.id, truckId) > 0);
+  const sourceAll: Item[] = sheet === 'transfer' ? onTruck.filter((i) => qty(i.id, truckId) > 0) : sheet === 'return' ? onTruckAny : items;
+  const sourceItems = sourceAll.filter((i) => !search.trim() || `${i.sku ?? ''} ${i.name}`.toLowerCase().includes(search.toLowerCase()));
+  const pickByScan = (item: Item, pieces: number) => {
+    if (!sourceAll.some((x) => x.id === item.id)) return `${item.name} isn't on ${fromTruck ? 'this truck' : 'the list'}`;
+    const cap = fromTruck ? qty(item.id, truckId) : Infinity;
+    const next = Math.min(cap, (pick[item.id] ?? 0) + pieces);
+    setPick((p) => ({ ...p, [item.id]: Math.min(cap, (p[item.id] ?? 0) + pieces) }));
+    return `+${pieces} ${item.sku ?? item.name} → ${next}${next === cap && fromTruck ? ' (all on truck)' : ''}`;
+  };
   const chosen = Object.entries(pick).filter(([, q]) => q > 0);
   const total = chosen.reduce((t, [, q]) => t + q, 0);
 
@@ -64,21 +78,22 @@ export default function TechHome() {
     setBusy(true); setError(null);
     try {
       const isT = sheet === 'transfer';
+      const isR = sheet === 'return';
+      const type = isT ? 'transfer' : isR ? 'return' : 'load';
       const res = must(await supabase.rpc('submit_ticket', {
-        p_type: isT ? 'transfer' : 'load',
-        p_from: isT ? truckId : warehouse.id,
-        p_to: isT ? dest : truckId,
-        p_lines: chosen.map(([item_id, q]) => {
-          const it = itemById(item_id);
-          return { item_id, qty: !isT && it?.mode === 'box' ? q * (it.units_per_box || 1) : q };
-        }),
+        p_type: type,
+        p_from: isT || isR ? truckId : warehouse.id,
+        p_to: isT ? dest : isR ? warehouse.id : truckId,
+        p_lines: chosen.map(([item_id, q]) => ({ item_id, qty: q })),
       })) as { number: number };
-      const code = ticketCode({ type: isT ? 'transfer' : 'load', number: res.number });
+      const code = ticketCode({ type, number: res.number });
       setDone({
         code,
         note: isT
           ? `Removed from ${truck?.name}. Waiting for ${locName(dest)} to confirm receipt.`
-          : `Moved from the warehouse to ${truck?.name}. The office can see this ticket now.`,
+          : isR
+            ? `Returned from ${truck?.name} to the warehouse.`
+            : `Moved from the warehouse to ${truck?.name}. The office can see this ticket now.`,
       });
       setSheet('done');
       setPick({});
@@ -209,19 +224,20 @@ export default function TechHome() {
         <div className="grid2" style={{ gridTemplateColumns: '1fr 1fr', gap: 8 }}>
           <button className="btn" onClick={() => open('transfer')}>Transfer to truck</button>
           <Link className="btn" to={isManager ? `/job?truck=${truckId}` : '/job'}>Close a job</Link>
+          <button className="btn" onClick={() => open('return')} style={{ gridColumn: '1 / -1' }}>Return to warehouse</button>
         </div>
       </div>
 
-      {(sheet === 'load' || sheet === 'transfer') && (
+      {(sheet === 'load' || sheet === 'transfer' || sheet === 'return') && (
         <Sheet
-          title={sheet === 'load' ? 'Load truck' : 'Transfer to another truck'}
-          sub={sheet === 'load' ? `Warehouse → ${truck.name}` : `${truck.name} → ${locName(dest)}`}
+          title={sheet === 'load' ? 'Load truck' : sheet === 'return' ? 'Return to warehouse' : 'Transfer to another truck'}
+          sub={sheet === 'load' ? `Warehouse → ${truck.name}` : sheet === 'return' ? `${truck.name} → Warehouse` : `${truck.name} → ${locName(dest)}`}
           onClose={close}
           foot={
             <>
               <ErrorMsg error={error} />
               <button className="btn primary block" disabled={total === 0 || busy || (sheet === 'transfer' && !dest)} onClick={submit}>
-                {total === 0 ? 'Add at least one item' : busy ? 'Submitting…' : `${sheet === 'load' ? 'Submit load ticket' : 'Submit transfer'} · ${total} ${total === 1 ? 'item' : 'items'}`}
+                {total === 0 ? 'Add at least one item' : busy ? 'Submitting…' : `${sheet === 'load' ? 'Submit load ticket' : sheet === 'return' ? 'Submit return' : 'Submit transfer'} · ${total} ${total === 1 ? 'pc' : 'pcs'}`}
               </button>
             </>
           }
@@ -233,11 +249,15 @@ export default function TechHome() {
               ))}
             </div>
           )}
-          {sourceItems.length === 0 && <div className="muted" style={{ padding: 12 }}>{sheet === 'transfer' ? 'Nothing on your truck to transfer.' : 'No items set up yet.'}</div>}
+          <div className="row" style={{ flexWrap: 'nowrap', padding: '6px 0' }}>
+            <input className="inp" type="search" placeholder="Search SKU or name" aria-label="Search items" value={search} onChange={(e) => setSearch(e.target.value)} />
+            <button type="button" className="btn primary" onClick={() => setScan(true)}>Scan</button>
+          </div>
+          {sourceItems.length === 0 && <div className="muted" style={{ padding: 12 }}>{search ? 'No items match.' : fromTruck ? 'Nothing on your truck.' : 'No items set up yet.'}</div>}
           {sourceItems.map((i) => {
-            const cap = sheet === 'transfer' ? qty(i.id, truckId) : Infinity;
-            const sub = sheet === 'transfer'
-              ? `On your truck: ${qty(i.id, truckId)}`
+            const cap = fromTruck ? qty(i.id, truckId) : Infinity;
+            const sub = fromTruck
+              ? `On your truck: ${piecesLabel(i, qty(i.id, truckId))}`
               : i.mode === 'box'
                 ? `Boxes of ${i.units_per_box ?? '?'} · warehouse has ${piecesLabel(i, qty(i.id, warehouse?.id))} pcs`
                 : `Warehouse ${qty(i.id, warehouse?.id)} · on truck ${qty(i.id, truckId)} / par ${i.truck_par}`;
@@ -247,10 +267,11 @@ export default function TechHome() {
                   <div style={{ fontWeight: 600 }}>{i.name}</div>
                   <div className="small muted">{sub}</div>
                 </div>
-                <Stepper value={pick[i.id] ?? 0} max={cap} suffix={i.mode === 'box' ? ' bx' : ''} onChange={(v) => setPick({ ...pick, [i.id]: v })} />
+                <Stepper value={pick[i.id] ?? 0} max={cap} step={i.mode === 'box' && !fromTruck ? i.units_per_box || 1 : 1} suffix={i.mode === 'box' ? ' pcs' : ''} onChange={(v) => setPick({ ...pick, [i.id]: v })} />
               </div>
             );
           })}
+          {scan && <Scanner title={sheet === 'load' ? 'Scan to load' : sheet === 'return' ? 'Scan to return' : 'Scan to transfer'} onItem={(r) => pickByScan(r.item, r.pieces)} onClose={() => setScan(false)} />}
         </Sheet>
       )}
 
@@ -268,6 +289,12 @@ export default function TechHome() {
             </>
           }
         >
+          <div style={{ padding: '6px 0' }}><button type="button" className="btn primary" onClick={() => setScan(true)}>Scan to count</button> <span className="small muted">Each scan adds to that item's count.</span></div>
+          {scan && <Scanner title="Scan to count" onItem={(r) => {
+            if (!tracked.some((t) => t.id === r.item.id)) return `${r.item.name} isn't counted on trucks`;
+            setCounts((c) => ({ ...c, [r.item.id]: (c[r.item.id] ?? 0) + r.pieces }));
+            return `+${r.pieces} ${r.item.sku ?? r.item.name} → ${(counts[r.item.id] ?? 0) + r.pieces}`;
+          }} onClose={() => setScan(false)} />}
           {tracked.filter((i) => i.strategy !== 'job').map((i) => (
             <div key={i.id} className="pick-row">
               <div className="grow"><div style={{ fontWeight: 600 }}>{i.name}</div></div>

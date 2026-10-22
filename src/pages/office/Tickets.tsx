@@ -5,7 +5,7 @@ import { ticketCode, TYPE_LABEL, when } from '../../lib/format';
 import type { Profile, Ticket, TicketType } from '../../lib/types';
 import { ErrorMsg, Sheet, Stepper } from '../../components/ui';
 
-type TypeFilter = 'all' | 'load' | 'job' | 'transfer' | 'other';
+type TypeFilter = 'all' | 'load' | 'job' | 'transfer' | 'return' | 'other';
 
 export default function Tickets() {
   const { itemById, locName, locations, items, refresh } = useData();
@@ -106,7 +106,7 @@ export default function Tickets() {
       <div className="split">
         <section className="main">
           <div className="chips">
-            {([['all', 'All'], ['load', TYPE_LABEL.load], ['job', TYPE_LABEL.job], ['transfer', TYPE_LABEL.transfer], ['other', 'Adjust / receive / reverse']] as [TypeFilter, string][]).map(([k, l]) => (
+            {([['all', 'All'], ['load', TYPE_LABEL.load], ['job', TYPE_LABEL.job], ['transfer', TYPE_LABEL.transfer], ['return', TYPE_LABEL.return], ['other', 'Adjust / receive / reverse']] as [TypeFilter, string][]).map(([k, l]) => (
               <button key={k} className="chip" aria-pressed={type === k} onClick={() => setType(k)}>{l} · {counts(k)}</button>
             ))}
           </div>
@@ -178,6 +178,7 @@ export default function Tickets() {
             <div><b>LD · Warehouse → truck:</b> tech taps Load truck. Stock moves on submit.</div>
             <div><b>JB · Truck → job:</b> created when a tech closes a job. Serial numbers link to the job.</div>
             <div><b>TR · Truck → truck:</b> pending until the receiving tech confirms. Stock leaves the sending truck right away.</div>
+            <div><b>RT · Truck → warehouse:</b> tech returns unused stock. Applies on submit.</div>
             <div><b>AD · Adjustment / RC · Received:</b> office-only. Audits create adjustments automatically.</div>
             <h2 style={{ fontSize: 15, marginTop: 6 }}>Your actions</h2>
             <div><b>Flag:</b> marks it for follow-up; stock stays moved.</div>

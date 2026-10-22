@@ -6,6 +6,8 @@ import { must, supabase } from '../../lib/supabase';
 import { parseCsvLine } from '../../lib/format';
 import { ErrorMsg, Sheet, Stepper } from '../../components/ui';
 import ItemImport from '../../components/ItemImport';
+import LabelPrint from '../../components/LabelPrint';
+import Scanner from '../../components/Scanner';
 
 type Filter = 'all' | 'reorder' | 'each' | 'box' | 'job';
 
@@ -16,11 +18,15 @@ export default function Dashboard() {
   const [search, setSearch] = useState('');
   const [receiving, setReceiving] = useState(false);
   const [recv, setRecv] = useState<Record<string, number>>({});
+  const [recvScan, setRecvScan] = useState(false);
+  const [recvSearch, setRecvSearch] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [xlsxFile, setXlsxFile] = useState<File | null>(null);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [labels, setLabels] = useState(false);
 
   const rows = useMemo(() => items.map((i) => {
     const mm = minMax(i, settings);
@@ -46,10 +52,7 @@ export default function Dashboard() {
     if (!warehouse) return;
     setBusy(true); setError(null);
     try {
-      const lines = Object.entries(recv).filter(([, q]) => q > 0).map(([item_id, q]) => {
-        const it = items.find((x) => x.id === item_id);
-        return { item_id, qty: it?.mode === 'box' ? q * (it.units_per_box || 1) : q };
-      });
+      const lines = Object.entries(recv).filter(([, q]) => q > 0).map(([item_id, q]) => ({ item_id, qty: q }));
       must(await supabase.rpc('submit_ticket', { p_type: 'receive', p_from: null, p_to: warehouse.id, p_lines: lines, p_note: 'Supplier delivery' }));
       setReceiving(false); setRecv({});
       setMsg('Delivery received into the warehouse.');
@@ -108,6 +111,7 @@ export default function Dashboard() {
         <div className="row">
           <input ref={fileRef} type="file" accept=".csv,text/csv,.xlsx" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) { if (/\.xlsx$/i.test(f.name)) setXlsxFile(f); else importCsv(f); } e.target.value = ''; }} />
           <button className="btn" onClick={() => fileRef.current?.click()}>Import items</button>
+          <button className="btn" disabled={picked.size === 0} onClick={() => setLabels(true)}>Print labels{picked.size ? ` (${picked.size})` : ''}</button>
           <button className="btn" onClick={() => { setRecv({}); setError(null); setReceiving(true); }}>Receive delivery</button>
           <Link className="btn primary" to="/items/new">+ Add item</Link>
         </div>
@@ -137,14 +141,15 @@ export default function Dashboard() {
             <div className="tbl">
               <table>
                 <thead>
-                  <tr><th>Item</th><th>Tier</th><th>Tracked</th><th className="num">Warehouse</th><th className="num">Trucks</th><th className="num">Min / Max (pcs)</th><th>Status</th></tr>
+                  <tr><th style={{ width: 36 }}><input type="checkbox" aria-label="Select all shown" checked={visible.length > 0 && visible.every((r) => picked.has(r.item.id))} onChange={(e) => setPicked(e.target.checked ? new Set([...picked, ...visible.map((r) => r.item.id)]) : new Set([...picked].filter((id) => !visible.some((r) => r.item.id === id))))} style={{ width: 18, height: 18 }} /></th><th>Item</th><th>Tier</th><th>Tracked</th><th className="num">Warehouse</th><th className="num">Trucks</th><th className="num">Min / Max (pcs)</th><th>Status</th></tr>
                 </thead>
                 <tbody>
                   {visible.length === 0 && (
-                    <tr><td colSpan={7} className="muted" style={{ padding: 20 }}>{items.length === 0 ? 'No items yet. Add one or import a CSV.' : 'No items match.'}</td></tr>
+                    <tr><td colSpan={8} className="muted" style={{ padding: 20 }}>{items.length === 0 ? 'No items yet. Add one or import a CSV.' : 'No items match.'}</td></tr>
                   )}
                   {visible.map(({ item: i, mm, wh, onTrucks, reorder, order }) => (
                     <tr key={i.id} className="click" onClick={() => nav(`/items/${i.id}`)}>
+                      <td onClick={(e) => e.stopPropagation()}><input type="checkbox" aria-label={`Select ${i.name}`} checked={picked.has(i.id)} onChange={(e) => { const n = new Set(picked); if (e.target.checked) n.add(i.id); else n.delete(i.id); setPicked(n); }} style={{ width: 18, height: 18 }} /></td>
                       <td>
                         <div style={{ fontWeight: 600 }}>{i.name}</div>
                         <div className="small muted">
@@ -193,6 +198,7 @@ export default function Dashboard() {
         </aside>
       </div>
 
+      {labels && <LabelPrint items={items.filter((i) => picked.has(i.id))} onClose={() => { setLabels(false); setPicked(new Set()); }} />}
       {xlsxFile && <ItemImport file={xlsxFile} onClose={() => setXlsxFile(null)} />}
 
       {receiving && (
@@ -202,13 +208,23 @@ export default function Dashboard() {
           onClose={() => setReceiving(false)}
           foot={<><ErrorMsg error={error} /><button className="btn primary block" disabled={busy || !Object.values(recv).some((v) => v > 0)} onClick={submitReceive}>{busy ? 'Saving…' : 'Receive into warehouse'}</button></>}
         >
-          {stockable.map((i) => (
+          <div className="row" style={{ flexWrap: 'nowrap', padding: '6px 0' }}>
+            <input className="inp" type="search" placeholder="Search SKU or name" aria-label="Search items" value={recvSearch} onChange={(e) => setRecvSearch(e.target.value)} />
+            <button type="button" className="btn primary" onClick={() => setRecvScan(true)}>Scan</button>
+          </div>
+          {recvScan && <Scanner title="Scan the delivery" onItem={(r) => {
+            if (r.item.strategy === 'job') return `${r.item.name} is buy-per-job (not stocked)`;
+            const next = (recv[r.item.id] ?? 0) + r.pieces;
+            setRecv((p) => ({ ...p, [r.item.id]: (p[r.item.id] ?? 0) + r.pieces }));
+            return `+${r.pieces} ${r.item.sku ?? r.item.name} → ${next}${r.label ? ` (${r.label})` : ''}`;
+          }} onClose={() => setRecvScan(false)} />}
+          {stockable.filter((i) => !recvSearch.trim() || `${i.sku ?? ''} ${i.name}`.toLowerCase().includes(recvSearch.toLowerCase())).map((i) => (
             <div key={i.id} className="pick-row">
               <div className="grow">
                 <div style={{ fontWeight: 600 }}>{i.name}</div>
-                <div className="small muted">Warehouse has {piecesLabel(i, qty(i.id, warehouse?.id))} pcs{i.mode === 'box' ? ` · enter boxes of ${i.units_per_box ?? '?'}` : ''}</div>
+                <div className="small muted">Warehouse has {piecesLabel(i, qty(i.id, warehouse?.id))} pcs{i.mode === 'box' ? ` · ± steps by a box of ${i.units_per_box ?? '?'}` : ''}</div>
               </div>
-              <Stepper value={recv[i.id] ?? 0} suffix={i.mode === 'box' ? ' bx' : ''} onChange={(v) => setRecv({ ...recv, [i.id]: v })} />
+              <Stepper value={recv[i.id] ?? 0} step={i.mode === 'box' ? i.units_per_box || 1 : 1} suffix=" pcs" onChange={(v) => setRecv({ ...recv, [i.id]: v })} />
             </div>
           ))}
         </Sheet>
