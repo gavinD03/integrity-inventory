@@ -54,8 +54,7 @@ export default function RequestView({ round, quotes, reload }: { round: QuoteRou
       const rows: RequestItem[] = chosen.map((i) => ({ sku: i.sku ?? '', name: i.name, annual: includeAnnual ? Math.round(annualUse(i)) || null : null }));
       const [xlsx, pdf] = await Promise.all([buildQuoteWorkbook(meta, rows), buildQuotePdf(meta, rows)]);
       const base = `IWT_Quote_${safeName(round.label)}_${safeName(meta.supplier)}`;
-      download(pdf, `${base}.pdf`);
-      download(xlsx, `${base}.xlsx`);
+      // Browsers block a second automatic download, so each file gets its own button below.
       setGenerated({ xlsx, pdf, base, count: res.lines });
       await reload();
     } catch (e) {
@@ -161,10 +160,10 @@ export default function RequestView({ round, quotes, reload }: { round: QuoteRou
           <div className="note" style={{ padding: 12 }}>Send both: <b>PDF to read, Excel to reply.</b> If they write on the PDF, use “Enter by hand.”</div>
           {generated && (
             <div className="ok-msg" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <span>Request recorded with {generated.count} items. Files downloaded.</span>
+              <span>Request recorded with {generated.count} items. Download both files:</span>
               <span className="row" style={{ gap: 8 }}>
-                <button className="btn sm" onClick={() => download(generated.pdf, `${generated.base}.pdf`)}>PDF again</button>
-                <button className="btn sm" onClick={() => download(generated.xlsx, `${generated.base}.xlsx`)}>Excel again</button>
+                <button className="btn primary" onClick={() => download(generated.xlsx, `${generated.base}.xlsx`)}>Download Excel</button>
+                <button className="btn" onClick={() => download(generated.pdf, `${generated.base}.pdf`)}>Download PDF</button>
               </span>
             </div>
           )}
