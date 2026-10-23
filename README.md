@@ -52,6 +52,8 @@ Warehouse and truck inventory for Integrity Water Treatment: tech truck view, st
 
 **Quote sheet columns:** SKU, Description, Est. annual qty, Box qty, **Retail price each (1-off)**, **Bulk price each**, **Bulk qty (pcs)**, Bulk savings % (formula), Notes. Every item is pre-selected. Retail is the price of one piece bought on its own, so bulk savings % = 1 − bulk ÷ retail. Costs, quotes and price breaks are all per piece; **Set as current supplier** also adopts that supplier's box qty.
 
+**Cost follows the supplier's latest quote (automatic):** setting or changing an item's supplier pulls that supplier's most recent saved retail price for it (unless you typed a new price in the same save), and saving a quote updates every item that has that supplier set. "Most recent" = latest quote date, then latest upload; drafts never apply. Box qty is filled from the quote only for box items that don't have one.
+
 **Price changes are logged:** every change to an item's cost, supplier, or price breaks — from quotes or from the item screen — is written to `price_change_log` by a database trigger. The Compare view shows the latest changes.
 
 ## First-time setup

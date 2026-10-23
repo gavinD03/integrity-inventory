@@ -43,6 +43,23 @@ export default function ItemEdit() {
   }, [existing, breaks]);
 
   const set = <K extends keyof Item>(k: K, v: Item[K]) => setF((p) => ({ ...p, [k]: v }));
+  const [quoteNote, setQuoteNote] = useState<string | null>(null);
+
+  // Picking a supplier pulls that supplier's most recent quoted price (the database does the same on save).
+  async function pickSupplier(id: string | null) {
+    set('supplier_id', id);
+    setQuoteNote(null);
+    if (!id || !f.id) return;
+    const { data } = await supabase.rpc('latest_quote_line', { p_item: f.id, p_supplier: id });
+    const l = data as { id: string | null; list_unit_price: number | null; pieces_per_pack: number | null } | null;
+    if (!l?.id || l.list_unit_price == null) { setQuoteNote('No saved quote from this supplier for this item. Enter the price by hand.'); return; }
+    const price = Math.round(Number(l.list_unit_price) * 10000) / 10000;
+    setF((p) => ({
+      ...p, supplier_id: id, unit_cost: price,
+      units_per_box: p.mode === 'box' && !(Number(p.units_per_box) > 1) && Number(l.pieces_per_pack) > 1 ? Number(l.pieces_per_pack) : p.units_per_box,
+    }));
+    setQuoteNote(`Price set to $${price} from this supplier’s latest quote.`);
+  }
   const calcItem = useMemo(() => (overriding ? f : { ...f, min_override: null, max_override: null }), [f, overriding]);
   const auto = useMemo(() => minMax({ ...f, min_override: null, max_override: null }, settings), [f, settings]);
   const mm = useMemo(() => minMax(calcItem, settings), [calcItem, settings]);
@@ -193,8 +210,8 @@ export default function ItemEdit() {
           <section className="card" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <h2>Suppliers</h2>
             <div className="grid2">
-              <Field label="Current supplier" id="i-sup" hint="Suppliers are managed in Settings">
-                <select id="i-sup" value={f.supplier_id ?? ''} onChange={(e) => set('supplier_id', e.target.value || null)}>
+              <Field label="Current supplier" id="i-sup" hint={quoteNote ?? 'Cost follows this supplier’s latest saved quote'}>
+                <select id="i-sup" value={f.supplier_id ?? ''} onChange={(e) => pickSupplier(e.target.value || null)}>
                   <option value="">{f.supplier && !f.supplier_id ? `${f.supplier} (not in list)` : 'None'}</option>
                   {suppliers.filter((x) => x.active || x.id === f.supplier_id).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
                 </select>
