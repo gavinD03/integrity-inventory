@@ -47,7 +47,8 @@ export default function ItemEdit() {
 
   // Picking a supplier pulls that supplier's most recent quoted price (the database does the same on save).
   async function pickSupplier(id: string | null) {
-    set('supplier_id', id);
+    const sup = suppliers.find((x) => x.id === id);
+    setF((p) => ({ ...p, supplier_id: id, lead_days: sup?.lead_days != null ? sup.lead_days : p.lead_days }));
     setQuoteNote(null);
     if (!id || !f.id) return;
     const { data } = await supabase.rpc('latest_quote_line', { p_item: f.id, p_supplier: id });
@@ -89,6 +90,7 @@ export default function ItemEdit() {
       }
       if (!overriding) { payload.min_override = null; payload.max_override = null; payload.override_note = null; }
       if (payload.mode === 'each') payload.units_per_box = null;
+      if (payload.mode === 'box' && !(Number(payload.units_per_box) > 1)) payload.units_per_box = null; // 0/1/blank = unknown
       if (payload.strategy !== 'truck') payload.truck_par = 0;
       payload.supplier = payload.supplier_id ? suppliers.find((x) => x.id === payload.supplier_id)?.name ?? payload.supplier : payload.supplier;
       let itemId = f.id;
@@ -198,7 +200,16 @@ export default function ItemEdit() {
             <h2>Usage + cost</h2>
             <div className="grid2">
               <Field label="Cost per piece ($)" id="i-cost" hint="Current supplier's single-piece price"><NumInput id="i-cost" value={f.unit_cost} onChange={(v) => set('unit_cost', v ?? 0)} /></Field>
-              {isBox && <Field label="Box qty (pieces per box)" id="i-upb" hint="Orders round up to whole boxes"><NumInput id="i-upb" step="1" value={f.units_per_box} onChange={(v) => set('units_per_box', v)} /></Field>}
+              {isBox && (
+                <Field label="Box qty (pieces per box)" id="i-upb" hint={Number(f.units_per_box) > 1 ? 'Orders round up to whole boxes' : 'Unknown: the item stays flagged until you enter it'}>
+                  <div className="row" style={{ flexWrap: 'nowrap', gap: 8 }}>
+                    <NumInput id="i-upb" step="1" min={2} placeholder="Unknown" value={f.units_per_box} onChange={(v) => set('units_per_box', v)} />
+                    {Number(f.units_per_box) > 1
+                      ? <button type="button" className="btn sm" onClick={() => set('units_per_box', null)}>Mark unknown</button>
+                      : <span className="pill amber">Unknown</span>}
+                  </div>
+                </Field>
+              )}
               <Field label="Avg usage per month (pieces)" id="i-use" hint={`Source: ${f.usage_source}`}><NumInput id="i-use" value={f.monthly_usage} onChange={(v) => set('monthly_usage', v ?? 0)} /></Field>
               <Field label="Monthly swing (std. dev.)" id="i-sd" hint="How much usage varies month to month"><NumInput id="i-sd" value={f.usage_sd} onChange={(v) => set('usage_sd', v ?? 0)} /></Field>
               {f.strategy === 'truck'

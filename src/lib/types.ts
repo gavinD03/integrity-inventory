@@ -146,6 +146,8 @@ export interface Supplier {
   notes: string | null;
   email: string | null;
   contact_name: string | null;
+  /** Standard lead time; items take it when this supplier is set on them. */
+  lead_days: number | null;
 }
 
 export interface QuoteRound {

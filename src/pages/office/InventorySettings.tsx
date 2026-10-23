@@ -41,7 +41,7 @@ export default function InventorySettings() {
       {tab === 'suppliers' && (
             <section className="card" style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 640 }}>
               <h2>Suppliers</h2>
-              <p className="small muted" style={{ margin: 0 }}>Contact and email are used when you email quote requests.</p>
+              <p className="small muted" style={{ margin: 0 }}>Contact and email are used when you email quote requests. Standard lead time is copied to an item when you set this supplier on it, and changing it updates items still on the old standard.</p>
               {suppliers.map((x) => (
                 <div key={x.id} style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingBottom: 10, borderBottom: '1px solid var(--line)', opacity: x.active ? 1 : 0.6 }}>
                   <div className="row" style={{ flexWrap: 'nowrap' }}>
@@ -50,6 +50,17 @@ export default function InventorySettings() {
                   </div>
                   <input className="inp" aria-label={`${x.name} contact name`} placeholder="Contact name" defaultValue={x.contact_name ?? ''} onBlur={(e) => e.target.value.trim() !== (x.contact_name ?? '') && run(async () => { must(await supabase.from('suppliers').update({ contact_name: e.target.value.trim() || null }).eq('id', x.id).select('id')); }, 'Contact saved.')} />
                   <input className="inp" type="email" aria-label={`${x.name} quote email`} placeholder="Quote email (comma-separate several)" defaultValue={x.email ?? ''} onBlur={(e) => e.target.value.trim() !== (x.email ?? '') && run(async () => { must(await supabase.from('suppliers').update({ email: e.target.value.trim() || null }).eq('id', x.id).select('id')); }, 'Email saved.')} />
+                  <label className="row small" style={{ flexWrap: 'nowrap', gap: 8 }}>
+                    <span className="muted" style={{ whiteSpace: 'nowrap' }}>Standard lead time</span>
+                    <input className="inp" type="number" min={0} step={1} aria-label={`${x.name} standard lead time in days`} placeholder="—" defaultValue={x.lead_days ?? ''} style={{ maxWidth: 90 }}
+                      onBlur={(e) => {
+                        const v = e.target.value === '' ? null : Math.max(0, Math.round(Number(e.target.value)));
+                        if (v === (x.lead_days ?? null)) return;
+                        run(async () => { must(await supabase.from('suppliers').update({ lead_days: v }).eq('id', x.id).select('id')); },
+                          v == null ? `${x.name}: standard lead time cleared.` : `${x.name}: ${v}-day lead time saved and applied to its items (custom lead times kept).`);
+                      }} />
+                    <span className="muted">days</span>
+                  </label>
                 </div>
               ))}
               <div className="row" style={{ flexWrap: 'nowrap' }}>

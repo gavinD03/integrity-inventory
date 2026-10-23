@@ -31,7 +31,9 @@ Warehouse and truck inventory for Integrity Water Treatment: tech truck view, st
 ## Inventory settings
 
 - **Item setup:** completion % per SKU and what's missing. Required: usage (or a manual min), price, supplier, box qty for box items, and no open "to confirm" note.
-- **SKU codes**, **Suppliers** (contact + quote email), **Min/max + holding** rules.
+- **Bulk edit:** tick items in Item setup (works with every filter) to set supplier (pulls quoted price + the supplier's lead time), lead time, or box qty / Unknown on all of them at once.
+- **Box qty Unknown:** box items with no box qty show “Box qty unknown” and stay incomplete until it's entered.
+- **SKU codes**, **Suppliers** (contact, quote email, **standard lead time**: copied to an item when the supplier is set on it; changing it updates items still on the old standard), **Min/max + holding** rules.
 - People, trucks and job kits are under **Company settings**.
 
 ## SKUs, labels and scanning

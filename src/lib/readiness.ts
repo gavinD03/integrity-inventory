@@ -14,7 +14,7 @@ export function readiness(i: Item): { checks: Check[]; done: number; total: numb
     ...(stocked ? [{ key: 'usage', label: 'Usage', ok: Number(i.monthly_usage) > 0 || hasOverride }] : []),
     { key: 'price', label: 'Price', ok: Number(i.unit_cost) > 0 },
     { key: 'supplier', label: 'Supplier', ok: !!i.supplier_id },
-    ...(i.mode === 'box' ? [{ key: 'box', label: 'Box qty', ok: Number(i.units_per_box) > 1 }] : []),
+    ...(i.mode === 'box' ? [{ key: 'box', label: 'Box qty unknown', ok: Number(i.units_per_box) > 1 }] : []),
     { key: 'confirm', label: 'Confirmed', ok: !i.needs_confirm },
   ];
   const done = checks.filter((c) => c.ok).length;

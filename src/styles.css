@@ -167,3 +167,8 @@ h2 { font-size: 17px; }
 .stat .bar { margin-top: 8px; }
 .tab-count { display: inline-block; margin-left: 6px; min-width: 20px; padding: 0 6px; border-radius: 999px; background: var(--warn-soft); color: var(--warn); font-size: 12px; font-weight: 700; line-height: 20px; text-align: center; }
 .chip[aria-pressed='true'] .tab-count { background: #fff; }
+
+/* Bulk edit bar (Item setup) */
+.bulk-bar { display: flex; flex-direction: column; gap: 12px; border-color: var(--accent); position: sticky; top: 8px; z-index: 5; }
+.bulk-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+.bulk-cell { display: flex; flex-direction: column; gap: 6px; }

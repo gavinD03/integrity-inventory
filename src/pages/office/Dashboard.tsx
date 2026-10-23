@@ -195,7 +195,7 @@ function StockTab({ rows }: { rows: Row[] }) {
                   <td onClick={(e) => e.stopPropagation()}><input type="checkbox" aria-label={`Select ${i.name}`} checked={picked.has(i.id)} onChange={(e) => { const n = new Set(picked); if (e.target.checked) n.add(i.id); else n.delete(i.id); setPicked(n); }} style={{ width: 18, height: 18 }} /></td>
                   <td>
                     <div style={{ fontWeight: 600 }}>{i.name}</div>
-                    <div className="small muted mono">{i.sku}{i.mode === 'box' ? ` · box of ${i.units_per_box ?? '?'}` : ''}</div>
+                    <div className="small muted mono">{i.sku}{i.mode === 'box' ? (Number(i.units_per_box) > 1 ? ` · box of ${i.units_per_box}` : ' · box qty unknown') : ''}</div>
                   </td>
                   <td className="num">{piecesLabel(i, wh)}</td>
                   <td className="num">{onTrucks || '—'}</td>
