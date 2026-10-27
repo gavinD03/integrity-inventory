@@ -76,8 +76,13 @@ Deno.serve(async (req) => {
     if (!validEmail(body.email)) return json({ error: 'Enter a valid email' }, 400);
     if (!validPassword(body.password)) return json({ error: 'Temporary password must be at least 8 characters' }, 400);
     if (!String(body.full_name ?? '').trim()) return json({ error: 'Enter a name' }, 400);
+    const email = String(body.email).trim().toLowerCase();
+    const truck = body.truck_id ? String(body.truck_id) : null;
+    // Pre-approve this email; the database only accepts accounts with a fresh approval.
+    const { error: pendErr } = await admin.from('pending_accounts').insert({ email, role, truck_id: truck, full_name: String(body.full_name).trim() });
+    if (pendErr) return json({ error: pendErr.message }, 400);
     const { data, error } = await admin.auth.admin.createUser({
-      email: String(body.email).trim().toLowerCase(),
+      email,
       password: String(body.password),
       email_confirm: true,
       user_metadata: { full_name: String(body.full_name).trim() },
