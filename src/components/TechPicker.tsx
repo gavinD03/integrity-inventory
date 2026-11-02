@@ -28,7 +28,7 @@ export default function TechPicker({ items, onAdd, scanTitle, quick, quickLabel,
         <div style={{ fontWeight: 600 }}>{i.name}</div>
         <div className="small muted">{[i.sku, note?.(i)].filter(Boolean).join(' · ')}</div>
       </div>
-      <span className="btn sm primary" aria-hidden>+ 1</span>
+      <span className="btn sm primary" aria-hidden>Add</span>
     </button>
   );
 
