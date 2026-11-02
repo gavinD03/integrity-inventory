@@ -7,7 +7,7 @@ import type { Audit, Item, Ticket } from '../../lib/types';
 import { ErrorMsg, Sheet, Stepper } from '../../components/ui';
 import ChangePassword from '../../components/ChangePassword';
 import Scanner from '../../components/Scanner';
-import { piecesLabel } from '../../lib/calc';
+import TechPicker from '../../components/TechPicker';
 
 type SheetKind = null | 'load' | 'transfer' | 'return' | 'count' | 'done';
 
@@ -30,9 +30,10 @@ export default function TechHome() {
   const [counts, setCounts] = useState<Record<string, number | null>>({});
   const [pwOpen, setPwOpen] = useState(false);
   const [scan, setScan] = useState(false);
-  const [search, setSearch] = useState('');
+  const [order, setOrder] = useState<string[]>([]); // picked items, in the order they were added
 
-  const tracked = useMemo(() => items.filter((i) => i.mode === 'each'), [items]);
+  // Everything is counted in individual pieces on the truck, fittings included.
+  const tracked = useMemo(() => items.filter((i) => i.strategy !== 'job'), [items]);
   const onTruck = useMemo(
     () => tracked.filter((i) => i.truck_par > 0 || qty(i.id, truckId) !== 0),
     [tracked, qty, truckId],
@@ -53,22 +54,23 @@ export default function TechHome() {
   useEffect(() => { loadExtras(); }, [loadExtras]);
 
   const open = (k: SheetKind) => {
-    setPick({}); setError(null); setSearch(''); setSheet(k);
+    setPick({}); setOrder([]); setError(null); setSheet(k);
     if (k === 'transfer') setDest(trucks.find((t) => t.id !== truckId)?.id ?? null);
   };
-  const close = () => { setSheet(null); setPick({}); setError(null); };
+  const close = () => { setSheet(null); setPick({}); setOrder([]); setError(null); };
 
   const fromTruck = sheet === 'transfer' || sheet === 'return';
   // Return can send back anything on the truck, including fittings loaded by the box.
   const onTruckAny = items.filter((i) => qty(i.id, truckId) > 0);
   const sourceAll: Item[] = sheet === 'transfer' ? onTruck.filter((i) => qty(i.id, truckId) > 0) : sheet === 'return' ? onTruckAny : items;
-  const sourceItems = sourceAll.filter((i) => !search.trim() || `${i.sku ?? ''} ${i.name}`.toLowerCase().includes(search.toLowerCase()));
-  const pickByScan = (item: Item, pieces: number) => {
+  // Tap or scan = +1 piece. Never a box.
+  const addOne = (item: Item) => {
     if (!sourceAll.some((x) => x.id === item.id)) return `${item.name} isn't on ${fromTruck ? 'this truck' : 'the list'}`;
     const cap = fromTruck ? qty(item.id, truckId) : Infinity;
-    const next = Math.min(cap, (pick[item.id] ?? 0) + pieces);
-    setPick((p) => ({ ...p, [item.id]: Math.min(cap, (p[item.id] ?? 0) + pieces) }));
-    return `+${pieces} ${item.sku ?? item.name} → ${next}${next === cap && fromTruck ? ' (all on truck)' : ''}`;
+    const next = Math.min(cap, (pick[item.id] ?? 0) + 1);
+    setPick((p) => ({ ...p, [item.id]: Math.min(cap, (p[item.id] ?? 0) + 1) }));
+    setOrder((o) => (o.includes(item.id) ? o : [...o, item.id]));
+    return `+1 ${item.sku ?? item.name} → ${next}${next === cap && fromTruck ? ' (all on truck)' : ''}`;
   };
   const chosen = Object.entries(pick).filter(([, q]) => q > 0);
   const total = chosen.reduce((t, [, q]) => t + q, 0);
@@ -202,7 +204,6 @@ export default function TechHome() {
             </div>
           );
         })}
-        <div className="small muted" style={{ padding: '4px 4px 0' }}>Fittings aren't counted on the truck. Load them by the box; the warehouse count drops by the pieces in each box.</div>
 
         {recent.length > 0 && (
           <div className="card" style={{ marginTop: 8 }}>
@@ -249,29 +250,29 @@ export default function TechHome() {
               ))}
             </div>
           )}
-          <div className="row" style={{ flexWrap: 'nowrap', padding: '6px 0' }}>
-            <input className="inp" type="search" placeholder="Search SKU or name" aria-label="Search items" value={search} onChange={(e) => setSearch(e.target.value)} />
-            <button type="button" className="btn primary" onClick={() => setScan(true)}>Scan</button>
-          </div>
-          {sourceItems.length === 0 && <div className="muted" style={{ padding: 12 }}>{search ? 'No items match.' : fromTruck ? 'Nothing on your truck.' : 'No items set up yet.'}</div>}
-          {sourceItems.map((i) => {
+          <TechPicker
+            items={sourceAll}
+            onAdd={addOne}
+            scanTitle={sheet === 'load' ? 'Scan to load' : sheet === 'return' ? 'Scan to return' : 'Scan to transfer'}
+            quick={fromTruck ? sourceAll : undefined}
+            quickLabel="Pick from what's on your truck"
+            note={(i) => fromTruck ? `${qty(i.id, truckId)} on truck` : `warehouse ${qty(i.id, warehouse?.id)} · truck ${qty(i.id, truckId)}`}
+          />
+          {order.length === 0 && <div className="muted small" style={{ padding: '8px 0' }}>Search or scan an item, then tap it to add it here.</div>}
+          {order.map((id) => {
+            const i = itemById(id);
+            if (!i) return null;
             const cap = fromTruck ? qty(i.id, truckId) : Infinity;
-            const sub = fromTruck
-              ? `On your truck: ${piecesLabel(i, qty(i.id, truckId))}`
-              : i.mode === 'box'
-                ? `Boxes of ${i.units_per_box ?? '?'} · warehouse has ${piecesLabel(i, qty(i.id, warehouse?.id))} pcs`
-                : `Warehouse ${qty(i.id, warehouse?.id)} · on truck ${qty(i.id, truckId)} / par ${i.truck_par}`;
             return (
               <div key={i.id} className="pick-row">
                 <div className="grow">
                   <div style={{ fontWeight: 600 }}>{i.name}</div>
-                  <div className="small muted">{sub}</div>
+                  <div className="small muted">{fromTruck ? `On your truck: ${qty(i.id, truckId)}` : `Warehouse ${qty(i.id, warehouse?.id)} · on truck ${qty(i.id, truckId)}${i.truck_par ? ` / par ${i.truck_par}` : ''}`}</div>
                 </div>
-                <Stepper value={pick[i.id] ?? 0} max={cap} step={i.mode === 'box' && !fromTruck ? i.units_per_box || 1 : 1} suffix={i.mode === 'box' ? ' pcs' : ''} onChange={(v) => setPick({ ...pick, [i.id]: v })} />
+                <Stepper value={pick[i.id] ?? 0} max={cap} step={1} onChange={(v) => setPick({ ...pick, [i.id]: v })} />
               </div>
             );
           })}
-          {scan && <Scanner title={sheet === 'load' ? 'Scan to load' : sheet === 'return' ? 'Scan to return' : 'Scan to transfer'} onItem={(r) => pickByScan(r.item, r.pieces)} onClose={() => setScan(false)} />}
         </Sheet>
       )}
 
@@ -289,13 +290,13 @@ export default function TechHome() {
             </>
           }
         >
-          <div style={{ padding: '6px 0' }}><button type="button" className="btn primary" onClick={() => setScan(true)}>Scan to count</button> <span className="small muted">Each scan adds to that item's count.</span></div>
+          <div style={{ padding: '6px 0' }}><button type="button" className="btn primary" onClick={() => setScan(true)}>Scan to count</button> <span className="small muted">Each scan adds 1 piece.</span></div>
           {scan && <Scanner title="Scan to count" onItem={(r) => {
             if (!tracked.some((t) => t.id === r.item.id)) return `${r.item.name} isn't counted on trucks`;
-            setCounts((c) => ({ ...c, [r.item.id]: (c[r.item.id] ?? 0) + r.pieces }));
-            return `+${r.pieces} ${r.item.sku ?? r.item.name} → ${(counts[r.item.id] ?? 0) + r.pieces}`;
+            setCounts((c) => ({ ...c, [r.item.id]: (c[r.item.id] ?? 0) + 1 }));
+            return `+1 ${r.item.sku ?? r.item.name} → ${(counts[r.item.id] ?? 0) + 1}`;
           }} onClose={() => setScan(false)} />}
-          {tracked.filter((i) => i.strategy !== 'job').map((i) => (
+          {[...onTruck, ...tracked.filter((i) => counts[i.id] != null && !onTruck.includes(i))].map((i) => (
             <div key={i.id} className="pick-row">
               <div className="grow"><div style={{ fontWeight: 600 }}>{i.name}</div></div>
               <input

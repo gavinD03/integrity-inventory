@@ -4,7 +4,8 @@ import { useData } from '../../lib/data';
 import { must, supabase } from '../../lib/supabase';
 import { ticketCode } from '../../lib/format';
 import { ErrorMsg, Stepper } from '../../components/ui';
-import Scanner from '../../components/Scanner';
+import TechPicker from '../../components/TechPicker';
+import type { Item } from '../../lib/types';
 
 interface Line { item_id: string; qty: number; serial: string }
 
@@ -15,13 +16,11 @@ export default function CloseJob() {
   const [jobRef, setJobRef] = useState('');
   const [kitId, setKitId] = useState<string | null>(null);
   const [lines, setLines] = useState<Line[]>([]);
-  const [addId, setAddId] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
-  const [scan, setScan] = useState(false);
 
-  const usable = items.filter((i) => i.mode === 'each');
+  const usable = items; // every part, fittings included, in individual pieces
 
   function applyKit(id: string) {
     setKitId(id);
@@ -30,10 +29,13 @@ export default function CloseJob() {
     setLines(kit.kit_items.map((k) => ({ item_id: k.item_id, qty: Number(k.qty), serial: '' })));
   }
 
-  function addLine() {
-    if (!addId || lines.some((l) => l.item_id === addId)) return;
-    setLines([...lines, { item_id: addId, qty: 1, serial: '' }]);
-    setAddId('');
+  // Tap or scan = +1 piece. Never a box.
+  function addOne(it: Item) {
+    const before = lines.find((l) => l.item_id === it.id)?.qty ?? 0;
+    setLines((ls) => (ls.some((l) => l.item_id === it.id)
+      ? ls.map((l) => (l.item_id === it.id ? { ...l, qty: l.qty + 1 } : l))
+      : [...ls, { item_id: it.id, qty: 1, serial: '' }]));
+    return `+1 ${it.sku ?? it.name} → ${before + 1}${it.serial_tracked ? ' · enter its serial' : ''}`;
   }
 
   const active = lines.filter((l) => l.qty > 0);
@@ -96,6 +98,15 @@ export default function CloseJob() {
           </div>
         )}
 
+        <TechPicker
+          items={usable}
+          onAdd={addOne}
+          scanTitle="Scan parts used"
+          quick={usable.filter((i) => qty(i.id, truckId) > 0)}
+          quickLabel="Pick from what's on your truck"
+          note={(i) => `${qty(i.id, truckId)} on truck`}
+        />
+        {lines.length === 0 && <div className="muted small">Search or scan a part, then tap it to add it here.</div>}
         {lines.map((l, idx) => {
           const it = itemById(l.item_id);
           if (!it) return null;
@@ -118,25 +129,6 @@ export default function CloseJob() {
           );
         })}
 
-        <button type="button" className="btn primary" onClick={() => setScan(true)}>Scan parts</button>
-        {scan && <Scanner title="Scan parts used" onItem={(r) => {
-          const before = lines.find((l) => l.item_id === r.item.id)?.qty ?? 0;
-          setLines((ls) => {
-            const ex = ls.find((l) => l.item_id === r.item.id);
-            return ex ? ls.map((l) => (l.item_id === r.item.id ? { ...l, qty: l.qty + r.pieces } : l)) : [...ls, { item_id: r.item.id, qty: r.pieces, serial: '' }];
-          });
-          return `+${r.pieces} ${r.item.sku ?? r.item.name} → ${before + r.pieces}${r.item.serial_tracked ? ' · enter its serial' : ''}`;
-        }} onClose={() => setScan(false)} />}
-        <div className="row" style={{ flexWrap: 'nowrap' }}>
-          <select className="inp" aria-label="Add a part" value={addId} onChange={(e) => setAddId(e.target.value)} style={{ flex: 1 }}>
-            <option value="">Add a part…</option>
-            {usable.filter((i) => !lines.some((l) => l.item_id === i.id)).map((i) => (
-              <option key={i.id} value={i.id}>{i.name}</option>
-            ))}
-          </select>
-          <button className="btn" onClick={addLine} disabled={!addId}>Add</button>
-        </div>
-        <div className="small muted">Fittings aren't entered here; they're counted when boxes are loaded.</div>
       </div>
       <div className="tech-foot">
         <ErrorMsg error={error} />

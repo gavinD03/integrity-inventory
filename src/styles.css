@@ -172,3 +172,7 @@ h2 { font-size: 17px; }
 .bulk-bar { display: flex; flex-direction: column; gap: 12px; border-color: var(--accent); position: sticky; top: 8px; z-index: 5; }
 .bulk-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
 .bulk-cell { display: flex; flex-direction: column; gap: 6px; }
+
+/* Tech picker: tappable search results */
+.tap-row { width: 100%; background: none; border: 0; border-bottom: 1px solid #f0f2ee; font: inherit; color: inherit; cursor: pointer; min-height: 56px; }
+.tap-row:active { background: var(--accent-soft); }
