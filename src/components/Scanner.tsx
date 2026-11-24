@@ -69,6 +69,25 @@ export default function Scanner({ title, onItem, onCapture, onClose, allowInacti
     let timer = 0;
     const video = videoRef.current!;
 
+    // Dense bin-label barcodes need pixels: ask for HD with continuous focus. The browser falls back gracefully.
+    const constraints: MediaStreamConstraints = {
+      audio: false,
+      video: {
+        facingMode: 'environment',
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+        advanced: [{ focusMode: 'continuous' } as MediaTrackConstraintSet],
+      },
+    };
+    // A little optical/digital zoom lets the phone sit far enough back to focus on a 1" label (where supported).
+    async function tune(s: MediaStream | null) {
+      const track = s?.getVideoTracks()[0];
+      const caps = (track?.getCapabilities?.() ?? {}) as { zoom?: { min: number; max: number } };
+      if (track && caps.zoom && caps.zoom.max >= 1.5) {
+        try { await track.applyConstraints({ advanced: [{ zoom: Math.min(2, caps.zoom.max) } as MediaTrackConstraintSet] }); } catch { /* not supported */ }
+      }
+    }
+
     async function start() {
       if (!navigator.mediaDevices?.getUserMedia) { setCamError('Camera not available in this browser. Type the code below.'); return; }
       const Detector = (window as unknown as { BarcodeDetector?: { new (o: { formats: string[] }): { detect: (v: HTMLVideoElement) => Promise<{ rawValue: string }[]> }; getSupportedFormats?: () => Promise<string[]> } }).BarcodeDetector;
@@ -78,8 +97,9 @@ export default function Scanner({ title, onItem, onCapture, onClose, allowInacti
       }
       try {
         if (native && Detector) {
-          stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+          stream = await navigator.mediaDevices.getUserMedia(constraints);
           if (stopped) return;
+          await tune(stream);
           video.srcObject = stream;
           await video.play();
           const det = new Detector({ formats: ['code_128', 'ean_13', 'ean_8', 'upc_a', 'upc_e'] });
@@ -98,11 +118,13 @@ export default function Scanner({ title, onItem, onCapture, onClose, allowInacti
           const [{ BrowserMultiFormatReader }, { BarcodeFormat, DecodeHintType }] = await Promise.all([import('@zxing/browser'), import('@zxing/library')]);
           const hints = new Map();
           hints.set(DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.CODE_128, BarcodeFormat.EAN_13, BarcodeFormat.EAN_8, BarcodeFormat.UPC_A, BarcodeFormat.UPC_E]);
+          hints.set(DecodeHintType.TRY_HARDER, true);
           const reader = new BrowserMultiFormatReader(hints, { delayBetweenScanAttempts: 120 });
-          zxingControls = await reader.decodeFromConstraints({ video: { facingMode: 'environment' }, audio: false }, video, (result) => {
+          zxingControls = await reader.decodeFromConstraints(constraints, video, (result) => {
             if (result && !stopped) handleRef.current(result.getText());
           });
           if (stopped) zxingControls.stop();
+          else await tune(video.srcObject as MediaStream | null);
         }
       } catch (e) {
         const name = (e as { name?: string }).name;
@@ -124,7 +146,7 @@ export default function Scanner({ title, onItem, onCapture, onClose, allowInacti
         <div className="sheet-head">
           <div>
             <div style={{ fontSize: 19, fontWeight: 700 }}>{title}</div>
-            <div className="small muted">Scan bin labels or manufacturer barcodes. Keeps scanning until you tap Done.</div>
+            <div className="small muted">Hold the label 4–6 inches away, flat and inside the frame. Keeps scanning until you tap Done.</div>
           </div>
           <button type="button" className="icon-btn" aria-label="Close scanner" onClick={onClose}>×</button>
         </div>
