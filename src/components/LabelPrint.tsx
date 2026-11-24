@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useData } from '../lib/data';
 import { must, supabase } from '../lib/supabase';
-import { buildLabelPdf, THERMAL_203_MAX_SKU, type LabelFormat } from '../lib/labels';
+import { buildLabelPdf, printThermalLabels, THERMAL_203_MAX_SKU, type LabelFormat } from '../lib/labels';
 import { sizeText } from '../lib/sku';
 import { download } from '../lib/sheets';
 import type { Item } from '../lib/types';
@@ -22,7 +22,7 @@ export default function LabelPrint({ items, onClose }: { items: Item[]; onClose:
   const total = printable.reduce((t, i) => t + (qty[i.id] ?? 0), 0);
   const longSkus = printable.filter((i) => (qty[i.id] ?? 0) > 0 && (i.sku ?? '').length > THERMAL_203_MAX_SKU);
 
-  async function print() {
+  async function print(how: 'print' | 'pdf') {
     setBusy(true); setError(null);
     try {
       const labels = printable.flatMap((i) => Array.from({ length: qty[i.id] ?? 0 }, () => ({
@@ -30,8 +30,12 @@ export default function LabelPrint({ items, onClose }: { items: Item[]; onClose:
         name: i.name,
         size: sizeText(i.sku as string, skuCodes),
       })));
-      const pdf = await buildLabelPdf(labels, format, format === 'avery5160' ? skip : 0);
-      download(pdf, `IWT_labels_${format === 'avery5160' ? 'Avery5160' : '2x1'}_${new Date().toISOString().slice(0, 10)}.pdf`);
+      if (how === 'print') {
+        await printThermalLabels(labels);
+      } else {
+        const pdf = await buildLabelPdf(labels, format, format === 'avery5160' ? skip : 0);
+        download(pdf, `IWT_labels_${format === 'avery5160' ? 'Avery5160' : '2x1'}_${new Date().toISOString().slice(0, 10)}.pdf`);
+      }
       const ids = printable.filter((i) => (qty[i.id] ?? 0) > 0).map((i) => i.id);
       must(await supabase.rpc('mark_labels_printed', { p_items: ids }));
       await refresh();
@@ -48,10 +52,17 @@ export default function LabelPrint({ items, onClose }: { items: Item[]; onClose:
       foot={done ? <button className="btn dark block" onClick={onClose}>Done</button> : (
         <>
           <ErrorMsg error={error} />
-          <button className="btn primary block" disabled={busy || total === 0} onClick={print}>{busy ? 'Building PDF…' : `Download ${total} label${total === 1 ? '' : 's'} (PDF)`}</button>
+          {format === 'thermal2x1' ? (
+            <>
+              <button className="btn primary block" disabled={busy || total === 0} onClick={() => print('print')}>{busy ? 'Opening print…' : `Print ${total} label${total === 1 ? '' : 's'}`}</button>
+              <button className="btn block" disabled={busy || total === 0} onClick={() => print('pdf')}>Download PDF instead</button>
+            </>
+          ) : (
+            <button className="btn primary block" disabled={busy || total === 0} onClick={() => print('pdf')}>{busy ? 'Building PDF…' : `Download ${total} label${total === 1 ? '' : 's'} (PDF)`}</button>
+          )}
         </>
       )}>
-      {done ? <div className="ok-msg" style={{ margin: '8px 0' }}>{done} Print at 100% / “Actual size” (not “Fit to page”).</div> : (
+      {done ? <div className="ok-msg" style={{ margin: '8px 0' }}>{done} {format === 'thermal2x1' ? 'In the print window pick the label printer, paper 2 × 1 in, scale 100% / Actual size, margins None.' : 'Print at 100% / “Actual size” (not “Fit to page”).'}</div> : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '6px 0' }}>
           <div className="chips" role="group" aria-label="Label format">
             <button className="chip" aria-pressed={format === 'avery5160'} onClick={() => setFormat('avery5160')}>Avery 5160 sheet (30/page)</button>

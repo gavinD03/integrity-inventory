@@ -70,6 +70,7 @@ export async function buildLabelPdf(labels: LabelSpec[], format: LabelFormat, sk
       if (i > 0) doc.addPage([2 * IN, 1 * IN], 'landscape');
       drawLabel(doc, l, 0, 0, 2 * IN, 1 * IN, true);
     });
+    doc.viewerPreferences({ PrintScaling: 'None', PickTrayByPDFSize: true });
     return doc.output('blob');
   }
   // Avery 5160: letter, 3 columns x 10 rows, label 2.625" x 1", top margin 0.5", left 0.1875", column pitch 2.75"
@@ -82,8 +83,65 @@ export async function buildLabelPdf(labels: LabelSpec[], format: LabelFormat, sk
     const row = Math.floor(slot / 3);
     drawLabel(doc, l, (0.1875 + col * 2.75) * IN, (0.5 + row * 1) * IN, 2.625 * IN, 1 * IN);
   });
+  doc.viewerPreferences({ PrintScaling: 'None' });
   return doc.output('blob');
 }
 
 /** Longest SKU that still prints at ≥2 printer dots per bar on a 203 dpi 2" thermal label (15 decoded, 17+ failed in testing). */
 export const THERMAL_203_MAX_SKU = 15;
+
+const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string));
+
+/** One 2" × 1" label as HTML (barcode as SVG bars). */
+function thermalLabelHtml(l: LabelSpec): string {
+  const bits = code128Bits(l.sku);
+  let rects = '';
+  let run = 0;
+  for (let i = 0; i <= bits.length; i++) {
+    if (i < bits.length && bits[i] === '1') { run++; continue; }
+    if (run) rects += `<rect x="${i - run}" y="0" width="${run}" height="1"/>`;
+    run = 0;
+  }
+  return `<div class="lbl"><div class="top"><span class="name">${esc(l.name)}</span>${l.size ? `<span class="size">${esc(l.size)}</span>` : ''}</div>`
+    + `<svg class="bars" viewBox="0 0 ${bits.length} 1" preserveAspectRatio="none" shape-rendering="crispEdges">${rects}</svg>`
+    + `<div class="sku">${esc(l.sku)}</div></div>`;
+}
+
+/**
+ * Prints 2" × 1" labels straight from the browser. The page declares its paper as 2in × 1in (@page),
+ * so the print dialog uses label-sized pages instead of the default Letter sheet.
+ */
+export function thermalLabelsDocument(labels: LabelSpec[]): string {
+  return `<!doctype html><html><head><meta charset="utf-8"><title>IWT labels</title><style>
+    @page { size: 2in 1in; margin: 0; }
+    html, body { margin: 0; padding: 0; }
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .lbl { width: 2in; height: 1in; box-sizing: border-box; padding: 0.05in 0.13in; display: flex; flex-direction: column; overflow: hidden; break-after: page; page-break-after: always; font-family: Helvetica, Arial, sans-serif; color: #000; }
+    .lbl:last-child { break-after: auto; page-break-after: auto; }
+    .top { display: flex; justify-content: space-between; align-items: baseline; gap: 4px; height: 0.2in; }
+    .name { font-size: 7pt; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .size { font-size: 13pt; font-weight: 700; white-space: nowrap; }
+    .bars { display: block; width: 100%; flex: 1; min-height: 0; fill: #000; }
+    .sku { font: 700 7pt 'Courier New', Courier, monospace; text-align: center; height: 0.13in; line-height: 0.13in; }
+  </style></head><body>${labels.map(thermalLabelHtml).join('')}</body></html>`;
+}
+
+export function printThermalLabels(labels: LabelSpec[]): Promise<void> {
+  const html = thermalLabelsDocument(labels);
+  return new Promise((resolve) => {
+    const f = document.createElement('iframe');
+    f.setAttribute('aria-hidden', 'true');
+    f.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden';
+    document.body.appendChild(f);
+    const done = () => { setTimeout(() => f.remove(), 1000); resolve(); };
+    f.onload = () => {
+      const w = f.contentWindow;
+      if (!w) return done();
+      w.addEventListener('afterprint', done);
+      w.focus();
+      w.print();
+      setTimeout(done, 60_000); // fallback if afterprint never fires
+    };
+    f.srcdoc = html;
+  });
+}
