@@ -15,6 +15,8 @@ export default function LabelPrint({ items, onClose }: { items: Item[]; onClose:
   const [qty, setQty] = useState<Record<string, number>>(() => Object.fromEntries(printable.map((i) => [i.id, 1])));
   const [format, setFormat] = useState<LabelFormat>('avery5160');
   const [skip, setSkip] = useState(0);
+  const [dpi, setDpi] = useState<number>(() => { try { return Number(localStorage.getItem('iwt-label-dpi')) || 203; } catch { return 203; } });
+  const pickDpi = (v: number) => { setDpi(v); try { localStorage.setItem('iwt-label-dpi', String(v)); } catch { /* storage blocked */ } };
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
@@ -31,7 +33,7 @@ export default function LabelPrint({ items, onClose }: { items: Item[]; onClose:
         size: sizeText(i.sku as string, skuCodes),
       })));
       if (how === 'print') {
-        await printThermalLabels(labels);
+        await printThermalLabels(labels, dpi);
       } else {
         const pdf = await buildLabelPdf(labels, format, format === 'avery5160' ? skip : 0);
         download(pdf, `IWT_labels_${format === 'avery5160' ? 'Avery5160' : '2x1'}_${new Date().toISOString().slice(0, 10)}.pdf`);
@@ -74,6 +76,15 @@ export default function LabelPrint({ items, onClose }: { items: Item[]; onClose:
               <input className="inp mono" type="number" min={0} max={29} value={skip} onChange={(e) => setSkip(Math.max(0, Math.min(29, Number(e.target.value) || 0)))} style={{ width: 70, minHeight: 36 }} />
               labels (for a partly used sheet)
             </label>
+          )}
+          {format === 'thermal2x1' && (
+            <div className="row" style={{ gap: 8 }}>
+              <span className="small muted">Printer resolution</span>
+              <div className="chips" role="group" aria-label="Printer resolution">
+                {[203, 300, 600].map((v) => <button key={v} className="chip" aria-pressed={dpi === v} onClick={() => pickDpi(v)}>{v} dpi</button>)}
+              </div>
+              <span className="small muted">Match your printer so every bar is a whole number of dots.</span>
+            </div>
           )}
           {format === 'thermal2x1' && longSkus.length > 0 && (
             <div className="err">

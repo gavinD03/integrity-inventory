@@ -92,9 +92,18 @@ export const THERMAL_203_MAX_SKU = 15;
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string));
 
-/** One 2" × 1" label as HTML (barcode as SVG bars). */
-function thermalLabelHtml(l: LabelSpec): string {
+/**
+ * One 2" × 1" label as HTML. Each barcode module is a whole number of printer dots
+ * (e.g. 2 dots at 203 dpi), so every bar prints the same width instead of being rounded unevenly.
+ */
+function thermalLabelHtml(l: LabelSpec, dpi: number): string {
   const bits = code128Bits(l.sku);
+  const widthDots = 2 * dpi;
+  // Widest whole-dot module that leaves ≥10 modules of quiet zone each side; accept ≥5 if that keeps bars at 2+ dots.
+  let dots = Math.floor(widthDots / (bits.length + 20));
+  if (dots < 2) dots = Math.max(dots, Math.floor(widthDots / (bits.length + 10)));
+  dots = Math.max(1, dots);
+  const barsIn = (bits.length * dots) / dpi;
   let rects = '';
   let run = 0;
   for (let i = 0; i <= bits.length; i++) {
@@ -103,7 +112,7 @@ function thermalLabelHtml(l: LabelSpec): string {
     run = 0;
   }
   return `<div class="lbl"><div class="top"><span class="name">${esc(l.name)}</span>${l.size ? `<span class="size">${esc(l.size)}</span>` : ''}</div>`
-    + `<svg class="bars" viewBox="0 0 ${bits.length} 1" preserveAspectRatio="none" shape-rendering="crispEdges">${rects}</svg>`
+    + `<svg class="bars" style="width:${barsIn.toFixed(4)}in" viewBox="0 0 ${bits.length} 1" preserveAspectRatio="none" shape-rendering="crispEdges">${rects}</svg>`
     + `<div class="sku">${esc(l.sku)}</div></div>`;
 }
 
@@ -111,23 +120,23 @@ function thermalLabelHtml(l: LabelSpec): string {
  * Prints 2" × 1" labels straight from the browser. The page declares its paper as 2in × 1in (@page),
  * so the print dialog uses label-sized pages instead of the default Letter sheet.
  */
-export function thermalLabelsDocument(labels: LabelSpec[]): string {
+export function thermalLabelsDocument(labels: LabelSpec[], dpi = 203): string {
   return `<!doctype html><html><head><meta charset="utf-8"><title>IWT labels</title><style>
     @page { size: 2in 1in; margin: 0; }
     html, body { margin: 0; padding: 0; }
     body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    .lbl { width: 2in; height: 1in; box-sizing: border-box; padding: 0.05in 0.13in; display: flex; flex-direction: column; overflow: hidden; break-after: page; page-break-after: always; font-family: Helvetica, Arial, sans-serif; color: #000; }
+    .lbl { width: 2in; height: 1in; box-sizing: border-box; padding: 0.05in 0.1in; display: flex; flex-direction: column; overflow: hidden; break-after: page; page-break-after: always; font-family: Helvetica, Arial, sans-serif; color: #000; }
     .lbl:last-child { break-after: auto; page-break-after: auto; }
     .top { display: flex; justify-content: space-between; align-items: baseline; gap: 4px; height: 0.2in; }
-    .name { font-size: 7pt; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .size { font-size: 13pt; font-weight: 700; white-space: nowrap; }
-    .bars { display: block; width: 100%; flex: 1; min-height: 0; fill: #000; }
-    .sku { font: 700 7pt 'Courier New', Courier, monospace; text-align: center; height: 0.13in; line-height: 0.13in; }
-  </style></head><body>${labels.map(thermalLabelHtml).join('')}</body></html>`;
+    .name { font-size: 8pt; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .size { font-size: 14pt; font-weight: 700; white-space: nowrap; }
+    .bars { display: block; margin: 0 auto; flex: 1; min-height: 0; fill: #000; }
+    .sku { font: 700 8pt 'Courier New', Courier, monospace; text-align: center; height: 0.13in; line-height: 0.13in; }
+  </style></head><body>${labels.map((l) => thermalLabelHtml(l, dpi)).join('')}</body></html>`;
 }
 
-export function printThermalLabels(labels: LabelSpec[]): Promise<void> {
-  const html = thermalLabelsDocument(labels);
+export function printThermalLabels(labels: LabelSpec[], dpi = 203): Promise<void> {
+  const html = thermalLabelsDocument(labels, dpi);
   return new Promise((resolve) => {
     const f = document.createElement('iframe');
     f.setAttribute('aria-hidden', 'true');
