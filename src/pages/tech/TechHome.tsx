@@ -255,11 +255,12 @@ export default function TechHome() {
             onAdd={addQty}
             max={fromTruck ? (i) => qty(i.id, truckId) - (pick[i.id] ?? 0) : undefined}
             scanTitle={sheet === 'load' ? 'Scan to load' : sheet === 'return' ? 'Scan to return' : 'Scan to transfer'}
-            quick={fromTruck ? sourceAll : undefined}
-            quickLabel="Pick from what's on your truck"
+            browse={fromTruck ? sourceAll : items.filter((i) => i.strategy !== 'job' && qty(i.id, warehouse?.id) > 0)}
+            browseLabel={fromTruck ? 'On your truck' : 'In the warehouse'}
             note={(i) => fromTruck ? `${qty(i.id, truckId)} on truck` : `warehouse ${qty(i.id, warehouse?.id)} · truck ${qty(i.id, truckId)}`}
           />
-          {order.length === 0 && <div className="muted small" style={{ padding: '8px 0' }}>Search or scan an item, set how many, and it shows up here.</div>}
+          <div className="picked-head">Added to this ticket{order.length ? ` · ${order.length}` : ''}</div>
+          {order.length === 0 && <div className="muted small" style={{ padding: '4px 0 8px' }}>Tap an item above (or scan it), set how many, and it shows up here.</div>}
           {order.map((id) => {
             const i = itemById(id);
             if (!i) return null;

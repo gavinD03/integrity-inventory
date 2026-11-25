@@ -4,7 +4,8 @@ import { ErrorMsg } from './ui';
 
 /** Product photo on the item screen: take one with the phone camera or pick a file. Shrunk before upload. */
 export default function ItemPhoto({ itemId, path, onChange }: { itemId: string | null; path: string | null | undefined; onChange: (path: string | null) => void }) {
-  const fileRef = useRef<HTMLInputElement>(null);
+  const camRef = useRef<HTMLInputElement>(null);
+  const rollRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const url = imageUrl(path);
@@ -31,10 +32,13 @@ export default function ItemPhoto({ itemId, path, onChange }: { itemId: string |
             ? <img className="item-photo" src={url} alt="Product photo" />
             : <div className="item-photo" style={{ display: 'grid', placeItems: 'center' }}><span className="small muted">No photo yet</span></div>}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <input ref={fileRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) pick(f); e.target.value = ''; }} />
-            <button type="button" className="btn primary" disabled={busy} onClick={() => fileRef.current?.click()}>{busy ? 'Saving…' : url ? 'Replace photo' : 'Add photo'}</button>
+            {/* capture opens the camera directly; the second input has no capture, so phones offer the camera roll / files */}
+            <input ref={camRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) pick(f); e.target.value = ''; }} />
+            <input ref={rollRef} type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) pick(f); e.target.value = ''; }} />
+            <button type="button" className="btn primary" disabled={busy} onClick={() => camRef.current?.click()}>{busy ? 'Saving…' : url ? 'Retake photo' : 'Take photo'}</button>
+            <button type="button" className="btn" disabled={busy} onClick={() => rollRef.current?.click()}>Choose from camera roll</button>
             {url && <button type="button" className="btn" disabled={busy} onClick={remove}>Remove</button>}
-            <div className="small muted">On a phone this opens the camera. Techs see it when they scan or search.</div>
+            <div className="small muted">On a computer both buttons open a file picker. Techs see the photo when they scan or search.</div>
           </div>
         </div>
       )}

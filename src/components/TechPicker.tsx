@@ -16,12 +16,12 @@ export function ItemThumb({ item, size = 44 }: { item: Item; size?: number }) {
  * Tech screens: search or scan an item, set the quantity in a pop-up (− / +, individual pieces), then add it.
  * Nothing is added until the tech confirms the quantity.
  */
-export default function TechPicker({ items, onAdd, scanTitle, quick, quickLabel, note, max }: {
+export default function TechPicker({ items, onAdd, scanTitle, browse, browseLabel, note, max }: {
   items: Item[];
   onAdd: (item: Item, qty: number) => string | null; // returns a message, or null if it couldn't be added
   scanTitle: string;
-  quick?: Item[];       // optional tap-to-add list shown when not searching (e.g. what's on the truck)
-  quickLabel?: string;
+  browse?: Item[];      // list shown right away, filterable by search and category (e.g. warehouse stock)
+  browseLabel?: string;
   note?: (item: Item) => string;
   max?: (item: Item) => number; // most that can be added (e.g. what's left on the truck)
 }) {
@@ -30,8 +30,15 @@ export default function TechPicker({ items, onAdd, scanTitle, quick, quickLabel,
   const [last, setLast] = useState<string | null>(null);
   const [pending, setPending] = useState<{ item: Item; fromScan: boolean } | null>(null);
   const [qty, setQty] = useState(1);
+  const [cat, setCat] = useState('');
   const q = search.trim().toLowerCase();
-  const matches = q ? items.filter((i) => `${i.sku ?? ''} ${i.name}`.toLowerCase().includes(q)).slice(0, 8) : [];
+  // With a browse list, search and category filter that list; search also reaches every other allowed item.
+  const pool = q ? items : (browse ?? []);
+  const shown = pool
+    .filter((i) => !q || `${i.sku ?? ''} ${i.name}`.toLowerCase().includes(q))
+    .filter((i) => !cat || (i.category ?? 'Other') === cat)
+    .slice(0, q ? 30 : 400);
+  const cats = [...new Set((browse ?? items).map((i) => i.category ?? 'Other'))].sort();
 
   const open = (item: Item, fromScan: boolean) => { setPending({ item, fromScan }); setQty(1); };
   const cap = pending && max ? Math.max(0, max(pending.item)) : Infinity;
@@ -63,13 +70,16 @@ export default function TechPicker({ items, onAdd, scanTitle, quick, quickLabel,
         <button type="button" className="btn primary" onClick={() => setScan(true)}>Scan</button>
       </div>
       {last && <div className="small ok-msg">{last}</div>}
-      {q && (matches.length ? matches.map(row) : <div className="small muted" style={{ padding: 8 }}>No items match “{search}”.</div>)}
-      {!q && quick && quick.length > 0 && (
-        <details>
-          <summary className="small muted" style={{ cursor: 'pointer', padding: '6px 0' }}>{quickLabel ?? 'Show all'} ({quick.length})</summary>
-          {quick.map(row)}
-        </details>
+      {(browse || q) && cats.length > 1 && (
+        <div className="chips chip-scroll" role="group" aria-label="Filter by category">
+          <button type="button" className="chip" aria-pressed={!cat} onClick={() => setCat('')}>All</button>
+          {cats.map((c) => <button key={c} type="button" className="chip" aria-pressed={cat === c} onClick={() => setCat(cat === c ? '' : c)}>{c}</button>)}
+        </div>
       )}
+      {!q && browse && <div className="small muted" style={{ padding: '2px 2px 0' }}>{browseLabel ?? 'Items'} · {shown.length}</div>}
+      {(browse || q) && (shown.length
+        ? <div className="browse-list">{shown.map(row)}</div>
+        : <div className="small muted" style={{ padding: 8 }}>{q ? `No items match “${search}”.` : 'Nothing here.'}</div>)}
 
       {scan && <Scanner title={scanTitle} onItem={(r) => {
         if (!items.some((x) => x.id === r.item.id)) return `${r.item.name} can’t be added here`;

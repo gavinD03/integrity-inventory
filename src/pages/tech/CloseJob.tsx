@@ -102,11 +102,12 @@ export default function CloseJob() {
           items={usable}
           onAdd={addQty}
           scanTitle="Scan parts used"
-          quick={usable.filter((i) => qty(i.id, truckId) > 0)}
-          quickLabel="Pick from what's on your truck"
+          browse={usable.filter((i) => qty(i.id, truckId) > 0)}
+          browseLabel="On your truck"
           note={(i) => `${qty(i.id, truckId)} on truck`}
         />
-        {lines.length === 0 && <div className="muted small">Search or scan a part, set how many, and it shows up here.</div>}
+        <div className="picked-head">Used on this job{lines.length ? ` · ${lines.length}` : ''}</div>
+        {lines.length === 0 && <div className="muted small">Tap a part above (or scan it), set how many, and it shows up here.</div>}
         {lines.map((l, idx) => {
           const it = itemById(l.item_id);
           if (!it) return null;
