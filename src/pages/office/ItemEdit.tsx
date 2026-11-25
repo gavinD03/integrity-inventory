@@ -8,6 +8,7 @@ import type { Item } from '../../lib/types';
 import { ErrorMsg, Field, NumInput, Seg } from '../../components/ui';
 import SkuBuilder from '../../components/SkuBuilder';
 import ItemBarcodes, { type QueuedBarcode } from '../../components/ItemBarcodes';
+import ItemPhoto from '../../components/ItemPhoto';
 import { freeSku, validSku } from '../../lib/sku';
 
 const blank: Item = {
@@ -75,7 +76,7 @@ export default function ItemEdit() {
     if (f.sku && !validSku(f.sku)) { setError('SKU can only use letters, numbers and single dashes'); return; }
     setBusy(true); setError(null);
     try {
-      const { id: _omit, sku_locked: _l, label_printed_at: _p, ...payload } = { ...f, name: f.name.trim() };
+      const { id: _omit, sku_locked: _l, label_printed_at: _p, image_path: _img, ...payload } = { ...f, name: f.name.trim() };
       void _omit; void _l; void _p;
       // Uniqueness (case-insensitive, including archived items). On collision offer SKU-2, SKU-3…
       const changed = payload.sku && (!existing || existing.sku !== payload.sku);
@@ -153,6 +154,7 @@ export default function ItemEdit() {
 
       <div className="split">
         <div className="main">
+          <ItemPhoto itemId={f.id || null} path={f.image_path} onChange={async (path) => { set('image_path', path); await refresh(); }} />
           <section className="card" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <h2>Item</h2>
             {params.get('saved') && <div className="ok-msg">Saved.{f.sku ? ' You can print its label below.' : ''}</div>}

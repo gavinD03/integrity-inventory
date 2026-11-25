@@ -7,7 +7,7 @@ import type { Audit, Item, Ticket } from '../../lib/types';
 import { ErrorMsg, Sheet, Stepper } from '../../components/ui';
 import ChangePassword from '../../components/ChangePassword';
 import Scanner from '../../components/Scanner';
-import TechPicker from '../../components/TechPicker';
+import TechPicker, { ItemThumb } from '../../components/TechPicker';
 
 type SheetKind = null | 'load' | 'transfer' | 'return' | 'count' | 'done';
 
@@ -63,14 +63,14 @@ export default function TechHome() {
   // Return can send back anything on the truck, including fittings loaded by the box.
   const onTruckAny = items.filter((i) => qty(i.id, truckId) > 0);
   const sourceAll: Item[] = sheet === 'transfer' ? onTruck.filter((i) => qty(i.id, truckId) > 0) : sheet === 'return' ? onTruckAny : items;
-  // Tap or scan = +1 piece. Never a box.
-  const addOne = (item: Item) => {
+  // The quantity comes from the pop-up (individual pieces, never boxes).
+  const addQty = (item: Item, n: number) => {
     if (!sourceAll.some((x) => x.id === item.id)) return `${item.name} isn't on ${fromTruck ? 'this truck' : 'the list'}`;
     const cap = fromTruck ? qty(item.id, truckId) : Infinity;
-    const next = Math.min(cap, (pick[item.id] ?? 0) + 1);
-    setPick((p) => ({ ...p, [item.id]: Math.min(cap, (p[item.id] ?? 0) + 1) }));
+    const next = Math.min(cap, (pick[item.id] ?? 0) + n);
+    setPick((p) => ({ ...p, [item.id]: Math.min(cap, (p[item.id] ?? 0) + n) }));
     setOrder((o) => (o.includes(item.id) ? o : [...o, item.id]));
-    return `+1 ${item.sku ?? item.name} → ${next}${next === cap && fromTruck ? ' (all on truck)' : ''}`;
+    return `${item.sku ?? item.name}: ${next} added${next === cap && fromTruck ? ' (all on truck)' : ''}`;
   };
   const chosen = Object.entries(pick).filter(([, q]) => q > 0);
   const total = chosen.reduce((t, [, q]) => t + q, 0);
@@ -252,19 +252,21 @@ export default function TechHome() {
           )}
           <TechPicker
             items={sourceAll}
-            onAdd={addOne}
+            onAdd={addQty}
+            max={fromTruck ? (i) => qty(i.id, truckId) - (pick[i.id] ?? 0) : undefined}
             scanTitle={sheet === 'load' ? 'Scan to load' : sheet === 'return' ? 'Scan to return' : 'Scan to transfer'}
             quick={fromTruck ? sourceAll : undefined}
             quickLabel="Pick from what's on your truck"
             note={(i) => fromTruck ? `${qty(i.id, truckId)} on truck` : `warehouse ${qty(i.id, warehouse?.id)} · truck ${qty(i.id, truckId)}`}
           />
-          {order.length === 0 && <div className="muted small" style={{ padding: '8px 0' }}>Search or scan an item, then tap it to add it here.</div>}
+          {order.length === 0 && <div className="muted small" style={{ padding: '8px 0' }}>Search or scan an item, set how many, and it shows up here.</div>}
           {order.map((id) => {
             const i = itemById(id);
             if (!i) return null;
             const cap = fromTruck ? qty(i.id, truckId) : Infinity;
             return (
               <div key={i.id} className="pick-row">
+                <ItemThumb item={i} size={40} />
                 <div className="grow">
                   <div style={{ fontWeight: 600 }}>{i.name}</div>
                   <div className="small muted">{fromTruck ? `On your truck: ${qty(i.id, truckId)}` : `Warehouse ${qty(i.id, warehouse?.id)} · on truck ${qty(i.id, truckId)}${i.truck_par ? ` / par ${i.truck_par}` : ''}`}</div>

@@ -69,6 +69,8 @@ export interface Item {
   label_printed_at: string | null;
   notes: string | null;
   needs_confirm: string | null;
+  /** Path in the item-images bucket (product photo). */
+  image_path?: string | null;
 }
 
 export interface PriceBreak {

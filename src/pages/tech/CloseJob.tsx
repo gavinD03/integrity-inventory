@@ -4,7 +4,7 @@ import { useData } from '../../lib/data';
 import { must, supabase } from '../../lib/supabase';
 import { ticketCode } from '../../lib/format';
 import { ErrorMsg, Stepper } from '../../components/ui';
-import TechPicker from '../../components/TechPicker';
+import TechPicker, { ItemThumb } from '../../components/TechPicker';
 import type { Item } from '../../lib/types';
 
 interface Line { item_id: string; qty: number; serial: string }
@@ -29,13 +29,13 @@ export default function CloseJob() {
     setLines(kit.kit_items.map((k) => ({ item_id: k.item_id, qty: Number(k.qty), serial: '' })));
   }
 
-  // Tap or scan = +1 piece. Never a box.
-  function addOne(it: Item) {
+  // The quantity comes from the pop-up (individual pieces, never boxes).
+  function addQty(it: Item, n: number) {
     const before = lines.find((l) => l.item_id === it.id)?.qty ?? 0;
     setLines((ls) => (ls.some((l) => l.item_id === it.id)
-      ? ls.map((l) => (l.item_id === it.id ? { ...l, qty: l.qty + 1 } : l))
-      : [...ls, { item_id: it.id, qty: 1, serial: '' }]));
-    return `+1 ${it.sku ?? it.name} → ${before + 1}${it.serial_tracked ? ' · enter its serial' : ''}`;
+      ? ls.map((l) => (l.item_id === it.id ? { ...l, qty: l.qty + n } : l))
+      : [...ls, { item_id: it.id, qty: n, serial: '' }]));
+    return `${it.sku ?? it.name}: ${before + n} used${it.serial_tracked ? ' · enter its serial' : ''}`;
   }
 
   const active = lines.filter((l) => l.qty > 0);
@@ -100,19 +100,20 @@ export default function CloseJob() {
 
         <TechPicker
           items={usable}
-          onAdd={addOne}
+          onAdd={addQty}
           scanTitle="Scan parts used"
           quick={usable.filter((i) => qty(i.id, truckId) > 0)}
           quickLabel="Pick from what's on your truck"
           note={(i) => `${qty(i.id, truckId)} on truck`}
         />
-        {lines.length === 0 && <div className="muted small">Search or scan a part, then tap it to add it here.</div>}
+        {lines.length === 0 && <div className="muted small">Search or scan a part, set how many, and it shows up here.</div>}
         {lines.map((l, idx) => {
           const it = itemById(l.item_id);
           if (!it) return null;
           return (
             <div key={l.item_id} className="card" style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
               <div className="row" style={{ flexWrap: 'nowrap' }}>
+                <ItemThumb item={it} size={40} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 600 }}>{it.name}</div>
                   <div className="small muted">On truck: {qty(it.id, truckId)}{it.strategy === 'job' ? ' · bought for this job' : ''}</div>

@@ -11,6 +11,7 @@ import { ErrorMsg, Stepper } from '../../components/ui';
 import ItemImport from '../../components/ItemImport';
 import LabelPrint from '../../components/LabelPrint';
 import Scanner from '../../components/Scanner';
+import { ItemThumb } from '../../components/TechPicker';
 
 type Tab = 'stock' | 'reorder' | 'receive';
 
@@ -194,8 +195,13 @@ function StockTab({ rows }: { rows: Row[] }) {
                 <tr key={i.id} className="click" onClick={() => nav(`/items/${i.id}`)}>
                   <td onClick={(e) => e.stopPropagation()}><input type="checkbox" aria-label={`Select ${i.name}`} checked={picked.has(i.id)} onChange={(e) => { const n = new Set(picked); if (e.target.checked) n.add(i.id); else n.delete(i.id); setPicked(n); }} style={{ width: 18, height: 18 }} /></td>
                   <td>
+                    <div className="row" style={{ flexWrap: 'nowrap', gap: 10 }}>
+                    <ItemThumb item={i} size={36} />
+                    <div>
                     <div style={{ fontWeight: 600 }}>{i.name}</div>
                     <div className="small muted mono">{i.sku}{i.mode === 'box' ? (Number(i.units_per_box) > 1 ? ` · box of ${i.units_per_box}` : ' · box qty unknown') : ''}</div>
+                    </div>
+                    </div>
                   </td>
                   <td className="num">{piecesLabel(i, wh)}</td>
                   <td className="num">{onTrucks || '—'}</td>
